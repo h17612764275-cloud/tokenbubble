@@ -1,6 +1,6 @@
 [package]
 name = "token-bubble"
-version = "0.2.7"
+version = "0.2.2"
 description = "Token Bubble Codex quota and usage monitor"
 authors = ["Token Bubble contributors"]
 license = "MIT"
@@ -38,7 +38,7 @@ tauri-plugin-window-state = "2"
 tokio = { version = "1", features = ["macros", "rt", "sync"] }
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.60", features = ["Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.60", features = ["Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging", "Win32_Storage_FileSystem"] }
 windows = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_System_DataExchange", "Win32_System_Memory", "Win32_UI_WindowsAndMessaging"] }
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]

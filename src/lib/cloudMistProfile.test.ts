@@ -13,20 +13,17 @@ describe("bubble cloud volume profile", () => {
     });
   });
 
-  it("uses quota for cloud height without dimming the remaining mist", () => {
-    const low = getCloudMistProfile(20);
-    const reported = getCloudMistProfile(44);
-    const high = getCloudMistProfile(92);
-    const full = getCloudMistProfile(100);
+  it("increases cloud height and density with remaining quota", () => {
+    const low = getCloudMistProfile(25);
+    const middle = getCloudMistProfile(50);
+    const high = getCloudMistProfile(89);
 
-    expect(low.visualFraction).toBeCloseTo(0.188, 4);
-    expect(reported.visualFraction).toBeCloseTo(0.4136, 4);
-    expect(high.visualFraction).toBeCloseTo(0.8648, 4);
-    expect(full.visualFraction).toBe(1.08);
-    for (const key of ["cloudCount", "cloudAlpha", "lowerCloudCount", "lowerCloudAlpha"] as const) {
-      expect(low[key]).toBeGreaterThan(0);
-      expect([reported[key], high[key], full[key]]).toEqual([low[key], low[key], low[key]]);
-    }
+    expect(low.visualFraction).toBeLessThan(middle.visualFraction);
+    expect(middle.visualFraction).toBeLessThan(high.visualFraction);
+    expect(low.cloudCount).toBeLessThanOrEqual(middle.cloudCount);
+    expect(middle.cloudCount).toBeLessThanOrEqual(high.cloudCount);
+    expect(low.cloudAlpha).toBeLessThan(middle.cloudAlpha);
+    expect(middle.cloudAlpha).toBeLessThan(high.cloudAlpha);
   });
 
   it("clamps invalid levels and only overscans at a full quota", () => {

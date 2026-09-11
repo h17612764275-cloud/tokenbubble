@@ -49,6 +49,7 @@ struct CoordinatorState {
     public: QuotaState,
     next_generation: u64,
     active: Option<Arc<Flight>>,
+    cached_expires_at: Option<Instant>,
 }
 
 struct Flight {
@@ -80,10 +81,31 @@ impl Default for QuotaCoordinator {
 
 impl QuotaCoordinator {
     pub fn new() -> Self {
+        Self::from_initial_state(Vec::new(), None)
+    }
+
+    pub fn with_cached_snapshots(
+        snapshots: Vec<ProviderSnapshot>,
+        valid_for: Duration,
+    ) -> Self {
+        Self::from_initial_state(snapshots, Some(Instant::now() + valid_for))
+    }
+
+    fn from_initial_state(
+        snapshots: Vec<ProviderSnapshot>,
+        cached_expires_at: Option<Instant>,
+    ) -> Self {
         let (changed, _) = broadcast::channel(16);
         Self {
             inner: Arc::new(CoordinatorInner {
-                state: Mutex::new(CoordinatorState::default()),
+                state: Mutex::new(CoordinatorState {
+                    public: QuotaState {
+                        snapshots,
+                        ..QuotaState::default()
+                    },
+                    cached_expires_at,
+                    ..CoordinatorState::default()
+                }),
                 changed,
             }),
         }
@@ -95,6 +117,32 @@ impl QuotaCoordinator {
 
     pub fn subscribe(&self) -> broadcast::Receiver<QuotaState> {
         self.inner.changed.subscribe()
+    }
+
+    pub async fn expire_cached_when_due(&self) {
+        self.expire_cached_while(|| true).await;
+    }
+
+    pub async fn expire_cached_while(&self, auth_is_current: impl Fn() -> bool) {
+        loop {
+            let deadline = {
+                let state = self.inner.state.lock().await;
+                state.cached_expires_at
+            };
+            let Some(deadline) = deadline else { return; };
+            if deadline <= Instant::now() || !auth_is_current() {
+                let mut state = self.inner.state.lock().await;
+                if state.cached_expires_at != Some(deadline) { continue; }
+                state.cached_expires_at = None;
+                state.public.snapshots = vec![ProviderSnapshot::failure(
+                    "unavailable", "Cached quota expired or login changed. It will retry automatically.",
+                )];
+                state.public.revision = state.public.revision.saturating_add(1);
+                let _ = self.inner.changed.send(state.public.clone());
+                return;
+            }
+            tokio::time::sleep_until(deadline.min(Instant::now() + Duration::from_millis(250))).await;
+        }
     }
 
     pub async fn refresh_with<F, Fut>(&self, fetch: F) -> QuotaState
@@ -154,7 +202,18 @@ impl QuotaCoordinator {
             let had_transient_failure = snapshots
                 .iter()
                 .any(|snapshot| snapshot.status == "unavailable");
-            state.public.snapshots = merge_snapshots(&state.public.snapshots, snapshots);
+            let cached_snapshot_expired = state
+                .cached_expires_at
+                .is_some_and(|expires_at| expires_at <= Instant::now());
+            let previous = if cached_snapshot_expired {
+                Vec::new()
+            } else {
+                state.public.snapshots.clone()
+            };
+            state.public.snapshots = merge_snapshots(&previous, snapshots);
+            if !had_transient_failure || cached_snapshot_expired {
+                state.cached_expires_at = None;
+            }
             state.public.refreshing = false;
             state.public.failure_count = if had_transient_failure {
                 state.public.failure_count.saturating_add(1)
@@ -275,6 +334,16 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn login_change_invalidates_startup_cache_before_ttl() {
+        let coordinator = QuotaCoordinator::with_cached_snapshots(vec![successful_snapshot()], Duration::from_secs(900));
+        coordinator.expire_cached_while(|| false).await;
+        let state = coordinator.current().await;
+        assert_eq!(state.snapshots[0].status, "unavailable");
+        assert!(state.snapshots[0].short_window.is_none());
+        assert_eq!(state.revision, 1);
+    }
+
+    #[tokio::test]
     async fn concurrent_refresh_callers_share_one_fetch_and_terminal_state() {
         let coordinator = QuotaCoordinator::new();
         let calls = Arc::new(AtomicUsize::new(0));
@@ -349,6 +418,108 @@ mod tests {
                 .unwrap()
                 .remaining_percent,
             75.0
+        );
+    }
+
+    #[tokio::test]
+    async fn cached_startup_snapshot_survives_initial_transient_failure() {
+        let cached = successful_snapshot();
+        let cached_updated_at = cached.updated_at.clone();
+        let coordinator =
+            QuotaCoordinator::with_cached_snapshots(vec![cached], Duration::from_secs(60));
+
+        let state = coordinator
+            .refresh_with(|| async {
+                vec![ProviderSnapshot::failure(
+                    "unavailable",
+                    "temporary startup failure",
+                )]
+            })
+            .await;
+
+        assert_eq!(state.failure_count, 1);
+        assert_eq!(state.snapshots[0].status, "ok");
+        assert_eq!(state.snapshots[0].updated_at, cached_updated_at);
+        assert_eq!(
+            state.snapshots[0]
+                .short_window
+                .as_ref()
+                .unwrap()
+                .remaining_percent,
+            75.0
+        );
+    }
+
+    #[tokio::test]
+    async fn expired_cached_startup_snapshot_is_not_retained() {
+        let coordinator = QuotaCoordinator::with_cached_snapshots(
+            vec![successful_snapshot()],
+            Duration::ZERO,
+        );
+
+        let state = coordinator
+            .refresh_with(|| async {
+                vec![ProviderSnapshot::failure(
+                    "unavailable",
+                    "temporary startup failure",
+                )]
+            })
+            .await;
+
+        assert_eq!(state.failure_count, 1);
+        assert_eq!(state.snapshots[0].status, "unavailable");
+        assert!(state.snapshots[0].short_window.is_none());
+    }
+
+    #[tokio::test]
+    async fn cached_startup_snapshot_expires_without_waiting_for_a_refresh() {
+        let coordinator = QuotaCoordinator::with_cached_snapshots(
+            vec![successful_snapshot()],
+            Duration::from_millis(20),
+        );
+        let mut changed = coordinator.subscribe();
+        let expiry_coordinator = coordinator.clone();
+        tokio::spawn(async move {
+            expiry_coordinator.expire_cached_when_due().await;
+        });
+
+        let state = tokio::time::timeout(Duration::from_secs(1), recv_next_state(&mut changed))
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(state.revision, 1);
+        assert_eq!(state.snapshots[0].status, "unavailable");
+        assert!(state.snapshots[0].short_window.is_none());
+    }
+
+    #[tokio::test]
+    async fn live_success_cancels_cached_startup_expiry() {
+        let coordinator = QuotaCoordinator::with_cached_snapshots(
+            vec![successful_snapshot()],
+            Duration::from_millis(20),
+        );
+        let expiry_coordinator = coordinator.clone();
+        let expiry_task = tokio::spawn(async move {
+            expiry_coordinator.expire_cached_when_due().await;
+        });
+        let mut fresh = successful_snapshot();
+        fresh.short_window.as_mut().unwrap().remaining_percent = 42.0;
+
+        coordinator
+            .refresh_with(move || async move { vec![fresh] })
+            .await;
+        expiry_task.await.unwrap();
+
+        let state = coordinator.current().await;
+        assert_eq!(state.snapshots[0].status, "ok");
+        assert_eq!(
+            state.snapshots[0]
+                .short_window
+                .as_ref()
+                .unwrap()
+                .remaining_percent,
+            42.0
         );
     }
 

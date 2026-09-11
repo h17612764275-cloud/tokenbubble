@@ -634,6 +634,7 @@ pub(crate) fn discard_capture(manager: &ScreenshotManager) {
 
 #[tauri::command]
 pub(crate) fn begin_screenshot(app: AppHandle, manager: State<'_, ScreenshotManager>) -> Result<(), String> {
+    crate::quick_actions::close_widget_quick_actions(app.clone())?;
     let lifecycle = manager
         .lifecycle_lock
         .lock()

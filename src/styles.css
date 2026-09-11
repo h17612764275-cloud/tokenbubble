@@ -706,12 +706,22 @@ button { font: inherit; }
 }
 .orb-bubble-cloud {
   z-index: 1;
-  opacity: .78;
-  filter: saturate(1.05) contrast(1.015) brightness(1.08);
-  mix-blend-mode: screen;
-  -webkit-mask-image: linear-gradient(to bottom, transparent 0 calc(var(--bubble-cloud-top) - 7%), rgba(0,0,0,.14) calc(var(--bubble-cloud-top) - 3%), rgba(0,0,0,.62) calc(var(--bubble-cloud-top) + 3%), #000 calc(var(--bubble-cloud-top) + 9%) 100%);
-  mask-image: linear-gradient(to bottom, transparent 0 calc(var(--bubble-cloud-top) - 7%), rgba(0,0,0,.14) calc(var(--bubble-cloud-top) - 3%), rgba(0,0,0,.62) calc(var(--bubble-cloud-top) + 3%), #000 calc(var(--bubble-cloud-top) + 9%) 100%);
+  opacity: .72;
+  filter: saturate(1.34) contrast(1.025) brightness(.99);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0 calc(var(--bubble-cloud-top) - 18%), rgba(0,0,0,.08) calc(var(--bubble-cloud-top) - 10%), rgba(0,0,0,.3) var(--bubble-cloud-top), rgba(0,0,0,.68) calc(var(--bubble-cloud-top) + 10%), #000 calc(var(--bubble-cloud-top) + 22%) 100%);
+  mask-image: linear-gradient(to bottom, transparent 0 calc(var(--bubble-cloud-top) - 18%), rgba(0,0,0,.08) calc(var(--bubble-cloud-top) - 10%), rgba(0,0,0,.3) var(--bubble-cloud-top), rgba(0,0,0,.68) calc(var(--bubble-cloud-top) + 10%), #000 calc(var(--bubble-cloud-top) + 22%) 100%);
   animation: bubble-cloud-breathe 11s ease-in-out infinite alternate;
+}
+.orb-cloud-photo-mask {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  border-radius: 50%;
+}
+.orb-cloud-photo-mask > .orb-bubble-cloud {
+  -webkit-mask-image: none;
+  mask-image: none;
 }
 .orb-bubble-rim {
   position: absolute;
@@ -727,7 +737,7 @@ button { font: inherit; }
   pointer-events: none;
   user-select: none;
 }
-.orb-cloud-canvas { position: absolute; inset: 2%; z-index: 1; width: 96%; height: 96%; border-radius: 50%; opacity: .64; filter: blur(.55px); mix-blend-mode: screen; pointer-events: none; }
+.orb-cloud-canvas { position: absolute; inset: 2%; z-index: 1; width: 96%; height: 96%; border-radius: 50%; opacity: .5; filter: blur(.8px); mix-blend-mode: screen; pointer-events: none; }
 .quota-orb--bubble.quota-orb--idle { opacity: 1; background: transparent; }
 .quota-orb--bubble .orb-metric span,
 .quota-orb--bottle .orb-metric span {

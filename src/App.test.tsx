@@ -10,8 +10,6 @@ const boundary = vi.hoisted(() => ({
   getQuotaState: vi.fn<() => Promise<QuotaState>>(),
   requestQuotaRefresh: vi.fn<() => Promise<QuotaState>>(),
   getPreferences: vi.fn(),
-  getFloatingWidgetVisible: vi.fn<() => Promise<boolean>>(),
-  toggleFloatingWidget: vi.fn<() => Promise<boolean>>(),
   recordDailyUsage: vi.fn(),
   activeListeners: 0,
   listenDesktopEvents: vi.fn(async (handlers: { onQuotaState?: (value: QuotaState) => void }) => {
@@ -27,10 +25,11 @@ const boundary = vi.hoisted(() => ({
 }));
 
 vi.mock("./lib/bridge", () => ({
+  showWidgetQuickActions: vi.fn(async () => undefined),
+  getFloatingWidgetVisible: vi.fn(async () => true),
   getQuotaState: boundary.getQuotaState,
   requestQuotaRefresh: boundary.requestQuotaRefresh,
   getPreferences: boundary.getPreferences,
-  getFloatingWidgetVisible: boundary.getFloatingWidgetVisible,
   listenDesktopEvents: boundary.listenDesktopEvents,
   listenWidgetMotion: vi.fn(async () => () => undefined),
   registerVoiceShortcut: vi.fn(async () => async () => undefined),
@@ -40,7 +39,7 @@ vi.mock("./lib/bridge", () => ({
   startDragging: vi.fn(),
   startVoice: vi.fn(async () => undefined),
   stopVoice: vi.fn(async () => undefined),
-  toggleFloatingWidget: boundary.toggleFloatingWidget,
+  toggleFloatingWidget: vi.fn(),
   togglePanelFromWidget: vi.fn(),
   updatePreferences: vi.fn(async () => undefined),
 }));
@@ -124,8 +123,6 @@ beforeEach(() => {
   boundary.desktopHandlers = null;
   boundary.activeListeners = 0;
   boundary.getPreferences.mockResolvedValue(preferences);
-  boundary.getFloatingWidgetVisible.mockReset().mockResolvedValue(true);
-  boundary.toggleFloatingWidget.mockReset().mockResolvedValue(false);
   boundary.getQuotaState.mockResolvedValue(quotaState(1, recovered));
   boundary.requestQuotaRefresh.mockResolvedValue(quotaState(2, newerRecovery));
   Object.defineProperty(HTMLCanvasElement.prototype, "getContext", { configurable: true, value: vi.fn(() => null) });
@@ -336,122 +333,5 @@ describe("backend-coordinated quota state", () => {
 
     expect(boundary.recordDailyUsage).toHaveBeenCalledTimes(1);
     expect(timeoutSpy.mock.calls.filter((call) => call[1] === 5 * 60_000)).toHaveLength(1);
-  });
-});
-
-describe("floating widget visibility control", () => {
-  it("ignores repeated visibility clicks while the native toggle is pending", async () => {
-    let resolveToggle: (visible: boolean) => void = () => undefined;
-    boundary.toggleFloatingWidget.mockImplementationOnce(
-      () => new Promise<boolean>((resolve) => { resolveToggle = resolve; }),
-    );
-    (window as typeof window & { __TOKEN_BUBBLE_VIEW__?: string }).__TOKEN_BUBBLE_VIEW__ = "tray";
-    render(<App />);
-
-    const toggle = await screen.findByLabelText("Show or hide widget");
-    fireEvent.click(toggle);
-    fireEvent.click(toggle);
-
-    expect(boundary.toggleFloatingWidget).toHaveBeenCalledTimes(1);
-
-    await act(async () => {
-      resolveToggle(false);
-      await Promise.resolve();
-    });
-  });
-
-  it("keeps the latest native visibility when an older read resolves last", async () => {
-    let resolveInitialVisibility: (visible: boolean) => void = () => undefined;
-    boundary.getFloatingWidgetVisible
-      .mockImplementationOnce(
-        () => new Promise<boolean>((resolve) => { resolveInitialVisibility = resolve; }),
-      )
-      .mockResolvedValueOnce(false);
-    boundary.toggleFloatingWidget.mockResolvedValueOnce(true);
-    (window as typeof window & { __TOKEN_BUBBLE_VIEW__?: string }).__TOKEN_BUBBLE_VIEW__ = "tray";
-    render(<App />);
-
-    const toggle = await screen.findByLabelText("Show or hide widget");
-    await act(async () => {
-      fireEvent.click(toggle);
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-    await act(async () => {
-      resolveInitialVisibility(true);
-      await Promise.resolve();
-    });
-
-    expect(boundary.getFloatingWidgetVisible).toHaveBeenCalledTimes(2);
-    expect(toggle.classList.contains("is-active")).toBe(false);
-  });
-
-  it("refreshes native visibility when the tray panel regains focus", async () => {
-    boundary.getFloatingWidgetVisible
-      .mockResolvedValueOnce(true)
-      .mockResolvedValueOnce(false);
-    (window as typeof window & { __TOKEN_BUBBLE_VIEW__?: string }).__TOKEN_BUBBLE_VIEW__ = "tray";
-    render(<App />);
-
-    const toggle = await screen.findByLabelText("Show or hide widget");
-    expect(toggle.classList.contains("is-active")).toBe(true);
-
-    await act(async () => {
-      window.dispatchEvent(new FocusEvent("focus"));
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    expect(boundary.getFloatingWidgetVisible).toHaveBeenCalledTimes(2);
-    expect(toggle.classList.contains("is-active")).toBe(false);
-  });
-
-  it("keeps the last hidden state when a focus visibility read fails", async () => {
-    boundary.getFloatingWidgetVisible
-      .mockResolvedValueOnce(false)
-      .mockRejectedValueOnce(new Error("native visibility unavailable"));
-    (window as typeof window & { __TOKEN_BUBBLE_VIEW__?: string }).__TOKEN_BUBBLE_VIEW__ = "tray";
-    render(<App />);
-
-    const toggle = await screen.findByLabelText("Show or hide widget");
-    await act(async () => { await Promise.resolve(); });
-    expect(toggle.classList.contains("is-active")).toBe(false);
-
-    await act(async () => {
-      window.dispatchEvent(new FocusEvent("focus"));
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    expect(boundary.getFloatingWidgetVisible).toHaveBeenCalledTimes(2);
-    expect(toggle.classList.contains("is-active")).toBe(false);
-  });
-
-  it("keeps the native toggle authoritative when focus changes while it is pending", async () => {
-    let nativeVisible = true;
-    let resolveToggle: (visible: boolean) => void = () => undefined;
-    boundary.getFloatingWidgetVisible.mockImplementation(async () => nativeVisible);
-    boundary.toggleFloatingWidget.mockImplementationOnce(
-      () => new Promise<boolean>((resolve) => { resolveToggle = resolve; }),
-    );
-    (window as typeof window & { __TOKEN_BUBBLE_VIEW__?: string }).__TOKEN_BUBBLE_VIEW__ = "tray";
-    render(<App />);
-
-    const toggle = await screen.findByLabelText("Show or hide widget");
-    await act(async () => { await Promise.resolve(); });
-
-    fireEvent.click(toggle);
-    await act(async () => {
-      window.dispatchEvent(new FocusEvent("focus"));
-      await Promise.resolve();
-    });
-    await act(async () => {
-      nativeVisible = false;
-      resolveToggle(false);
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    expect(toggle.classList.contains("is-active")).toBe(false);
   });
 });

@@ -148,8 +148,6 @@ export const TrayPanel = memo(function TrayPanel({
     }
   });
   const shortcutCaptureButton = useRef<HTMLButtonElement>(null);
-  const widgetToggleInFlight = useRef(false);
-  const widgetVisibilityGeneration = useRef(0);
 
   const localUsage = snapshot.localUsage;
   const localDaily = useMemo(
@@ -179,25 +177,15 @@ export const TrayPanel = memo(function TrayPanel({
 
   useEffect(() => {
     let cancelled = false;
-    const syncWidgetVisibility = () => {
-      if (widgetToggleInFlight.current) return;
-      const generation = ++widgetVisibilityGeneration.current;
-      void getFloatingWidgetVisible()
-        .then((visible) => {
-          if (!cancelled && widgetVisibilityGeneration.current === generation) {
-            setWidgetVisible(visible);
-          }
-        })
-        .catch(() => {
-          // Preserve the last confirmed native state when visibility cannot be read.
-        });
-    };
-    syncWidgetVisibility();
-    window.addEventListener("focus", syncWidgetVisibility);
+    void getFloatingWidgetVisible()
+      .then((visible) => {
+        if (!cancelled) setWidgetVisible(visible);
+      })
+      .catch(() => {
+        if (!cancelled) setWidgetVisible(true);
+      });
     return () => {
       cancelled = true;
-      window.removeEventListener("focus", syncWidgetVisibility);
-      widgetVisibilityGeneration.current += 1;
     };
   }, []);
 
@@ -863,30 +851,14 @@ export const TrayPanel = memo(function TrayPanel({
             type="button"
             className={widgetVisible ? "is-active" : ""}
             onClick={async () => {
-              if (widgetToggleInFlight.current) return;
-              widgetToggleInFlight.current = true;
-              const generation = ++widgetVisibilityGeneration.current;
               try {
-                let visible = await onToggleWidget();
-                try {
-                  visible = await getFloatingWidgetVisible();
-                } catch {
-                  // Use the command result when native visibility cannot be read back.
-                }
-                if (widgetVisibilityGeneration.current === generation) {
-                  setWidgetVisible(visible);
-                }
+                setWidgetVisible(await onToggleWidget());
               } catch {
                 try {
-                  const visible = await getFloatingWidgetVisible();
-                  if (widgetVisibilityGeneration.current === generation) {
-                    setWidgetVisible(visible);
-                  }
+                  setWidgetVisible(await getFloatingWidgetVisible());
                 } catch {
-                  // Preserve the last confirmed state when both native calls fail.
+                  setWidgetVisible((current) => !current);
                 }
-              } finally {
-                widgetToggleInFlight.current = false;
               }
             }}
             title={zh ? "显示或隐藏浮窗" : "Show or hide widget"}

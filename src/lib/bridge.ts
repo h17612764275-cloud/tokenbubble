@@ -404,3 +404,7 @@ export async function listenDesktopEvents(handlers: {
   }
   return cleanupAll;
 }
+
+export async function showWidgetQuickActions(): Promise<void> { if (!isTauri()) return; const { invoke } = await import("@tauri-apps/api/core"); await invoke("show_widget_quick_actions"); }
+export async function closeWidgetQuickActions(): Promise<void> { if (!isTauri()) return; const { invoke } = await import("@tauri-apps/api/core"); await invoke("close_widget_quick_actions"); }
+export async function hideFloatingWidget(): Promise<boolean> { if (!isTauri()) return false; const { invoke } = await import("@tauri-apps/api/core"); return invoke<boolean>("hide_floating_widget"); }

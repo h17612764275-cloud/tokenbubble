@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { WidgetQuickActionsWindow } from "./components/WidgetQuickActionsWindow";
+import { showWidgetQuickActions } from "./lib/bridge";
 import { QuotaOrb } from "./components/QuotaCard";
 import { PinnedScreenshot } from "./components/PinnedScreenshot";
 import { ScreenshotOverlay } from "./components/ScreenshotOverlay";
@@ -19,6 +21,7 @@ export default function App() {
   const bootstrap = window as typeof window & { __TOKEN_BUBBLE_VIEW__?: string };
   const view = bootstrap.__TOKEN_BUBBLE_VIEW__ ?? new URLSearchParams(window.location.search).get("view");
   const nativeLabel = "__TAURI_INTERNALS__" in window ? getCurrentWindow().label : "";
+  if (nativeLabel === "quick-actions" || view === "quick-actions") return <WidgetQuickActionsWindow />;
   if (nativeLabel === "screenshot" || view === "screenshot") return <ScreenshotOverlay />;
   if (nativeLabel.startsWith("pin-") || view === "pin") return <PinnedScreenshot />;
   return <QuotaApp isTrayPanel={nativeLabel === "tray-panel" || view === "tray"} />;
@@ -315,5 +318,5 @@ function QuotaApp({ isTrayPanel }: { isTrayPanel: boolean }) {
     );
   }
 
-  return <QuotaOrb snapshot={current} language={language} positionLocked={preferences.positionLocked} widgetSize={preferences.widgetSize} accentColor={preferences.accentColor} widgetStyle={preferences.widgetStyle} voiceEvent={voiceEvent} onDrag={() => startDragging()} onHover={(value) => { setHovered(value); if (value && (current.status === "unavailable" || current.status === "stale")) void refresh(); }} onOpenPanel={() => togglePanelFromWidget()} />;
+  return <QuotaOrb onOpenQuickActions={() => showWidgetQuickActions()} snapshot={current} language={language} positionLocked={preferences.positionLocked} widgetSize={preferences.widgetSize} accentColor={preferences.accentColor} widgetStyle={preferences.widgetStyle} voiceEvent={voiceEvent} onDrag={() => startDragging()} onHover={(value) => { setHovered(value); if (value && (current.status === "unavailable" || current.status === "stale")) void refresh(); }} onOpenPanel={() => togglePanelFromWidget()} />;
 }

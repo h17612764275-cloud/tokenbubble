@@ -26,7 +26,9 @@ Token Bubble 基于 **Quota Float** 开发，并集成 **CodexScope** 的本地�
 
 验证记录：139 项前端测试通过，正式构建与已认可预览的深浅背景、静止、拖动和回稳画面对照通过，安装文件与包内文件校验一致。
 
-**本次仅备份 Windows 安装包并更新本 README，不更新应用源码，也不构建或上传 macOS 包。** 此备份标签所指的仓库源码及 GitHub 自动提供的 Source code 压缩包，不包含该安装包的全部本地定制改动，不能据此重建相同效果。
+**此 Windows 安装包对应的应用源码已同步到仓库。** [查看固定源码快照](https://github.com/h17612764275-cloud/token-bubble/tree/windows-source-20260912-center-flow) · [下载源码 ZIP](https://github.com/h17612764275-cloud/token-bubble/archive/refs/tags/windows-source-20260912-center-flow.zip)。
+
+安装包备份标签创建于源码同步之前，保持原样；需要对应源码时请使用上面的源码快照，而不是旧备份页底部自动生成的 Source code 文件。本次没有构建或上传 macOS 包。编译缓存、node_modules、本地账号设置、交接记录及语音模型文件不包含在源码提交中；Windows 构建所需语音模型通过下方命令下载。
 
 安装包：`Token-Bubble_0.2.2_center-flow_20260912_x64-setup.exe`（292,794,399 字节）
 
@@ -194,10 +196,10 @@ npm run build
 npm run tauri dev
 ```
 
-构建安装包：
+在 Windows 上构建与此备份对应的 x64 安装包（先运行上面的 `npm run models:fetch`）：
 
 ```bash
-npm run tauri build
+npm run tauri -- build --bundles nsis
 ```
 
 ## 反馈

@@ -2,9 +2,11 @@ import { memo, useEffect, useRef } from "react";
 import { listenWidgetMotion } from "../lib/bridge";
 import { getCloudMistProfile } from "../lib/cloudMistProfile";
 import { applyLiquidMotion, initialLiquidPhysics, stepLiquidPhysics } from "../lib/liquidPhysics";
+import type { CloudHeightMotion } from "../lib/cloudHeightMask";
 
 interface Props {
   level: number;
+  onMotionFrame?: (frame: CloudHeightMotion) => void;
 }
 
 function drawSoftCloud(
@@ -30,9 +32,11 @@ function drawSoftCloud(
   context.restore();
 }
 
-export const CloudMistGauge = memo(function CloudMistGauge({ level }: Props) {
+export const CloudMistGauge = memo(function CloudMistGauge({ level, onMotionFrame }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const levelRef = useRef(level);
+  const motionFrameRef = useRef(onMotionFrame);
+  motionFrameRef.current = onMotionFrame;
 
   useEffect(() => { levelRef.current = level; }, [level]);
 
@@ -131,6 +135,7 @@ export const CloudMistGauge = memo(function CloudMistGauge({ level }: Props) {
         drawSoftCloud(context, x, y, w * .28, h * .18, lowerCloudAlpha);
       }
 
+      motionFrameRef.current?.({ time: now, tilt: physics.tilt, wave: physics.wave, energy: motionEnergy, reducedMotion: reducedMotion.matches });
       frame = window.requestAnimationFrame(draw);
     };
 

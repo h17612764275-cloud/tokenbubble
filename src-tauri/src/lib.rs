@@ -2,6 +2,8 @@ mod codex;
 mod local_usage;
 mod models;
 mod quota;
+mod quota_cache;
+mod quick_actions;
 mod screenshot;
 mod voice;
 
@@ -31,8 +33,6 @@ use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use tauri_plugin_window_state::Builder as WindowStateBuilder;
 use voice::VoiceManager;
-#[cfg(target_os = "windows")]
-use windows_sys::Win32::UI::Input::KeyboardAndMouse::GetDoubleClickTime;
 
 const DEFAULT_COLLAPSED_LOGICAL_SIZE: f64 = 68.0;
 const MIN_COLLAPSED_LOGICAL_SIZE: f64 = 52.0;
@@ -232,103 +232,16 @@ struct WidgetGeometryState {
     user_moved_expanded: bool,
 }
 
-#[derive(Clone, Copy, Debug)]
-struct WidgetVisibilityState {
-    user_wants_visible: bool,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum PanelFocusLossDecision {
-    Cancel,
-    WaitForDoubleClick,
-    Hide,
-}
-
-impl Default for WidgetVisibilityState {
-    fn default() -> Self {
-        Self {
-            user_wants_visible: true,
-        }
-    }
-}
-
-#[derive(Debug)]
-struct WindowVisibilityCoordinator {
-    widget: Mutex<WidgetVisibilityState>,
-    panel_focus_loss_generation: AtomicU64,
-}
-
-impl Default for WindowVisibilityCoordinator {
-    fn default() -> Self {
-        Self {
-            widget: Mutex::new(WidgetVisibilityState::default()),
-            panel_focus_loss_generation: AtomicU64::new(0),
-        }
-    }
-}
-
-impl WindowVisibilityCoordinator {
-    fn with_user_widget_visibility<T>(
-        &self,
-        visible: bool,
-        operation: impl FnOnce() -> T,
-    ) -> T {
-        let mut state = self
-            .widget
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        state.user_wants_visible = visible;
-        operation()
-    }
-
-    fn with_external_widget_show<T>(&self, operation: impl FnOnce() -> T) -> Option<T> {
-        let state = self
-            .widget
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        state.user_wants_visible.then(operation)
-    }
-
-    fn begin_panel_focus_loss(&self) -> u64 {
-        self.panel_focus_loss_generation
-            .fetch_add(1, Ordering::AcqRel)
-            .wrapping_add(1)
-    }
-
-    fn supersede_panel_focus_loss(&self) {
-        self.panel_focus_loss_generation
-            .fetch_add(1, Ordering::AcqRel);
-    }
-
-    fn panel_focus_loss_is_current(&self, generation: u64) -> bool {
-        self.panel_focus_loss_generation.load(Ordering::Acquire) == generation
-    }
-
-    fn panel_focus_loss_decision(
-        &self,
-        generation: u64,
-        panel_focused: bool,
-        widget_focused: bool,
-    ) -> PanelFocusLossDecision {
-        if !self.panel_focus_loss_is_current(generation) || panel_focused {
-            PanelFocusLossDecision::Cancel
-        } else if widget_focused {
-            PanelFocusLossDecision::WaitForDoubleClick
-        } else {
-            PanelFocusLossDecision::Hide
-        }
-    }
-}
-
 struct AppState {
     client: reqwest::Client,
     preferences: Mutex<WidgetPreferences>,
     preferences_path: PathBuf,
+    quota_cache_path: PathBuf,
+    startup_cache_auth: Option<quota_cache::AuthContext>,
     #[cfg(debug_assertions)]
     simulate_short_window_for_testing: Mutex<bool>,
     geometry: Mutex<Option<WidgetGeometryState>>,
     drag_mode: Mutex<Option<WidgetMode>>,
-    window_visibility: WindowVisibilityCoordinator,
     panel_resize_active: AtomicBool,
     panel_resize_generation: AtomicU64,
 }
@@ -366,82 +279,21 @@ fn end_panel_resize(app: AppHandle, state: State<'_, AppState>) {
     finish_panel_resize_after(app, generation, Duration::ZERO);
 }
 
-fn cursor_is_inside_window(window: &tauri::Window) -> bool {
-    window
-        .cursor_position()
-        .ok()
-        .zip(window.outer_position().ok())
-        .zip(window.outer_size().ok())
-        .is_some_and(|((cursor, position), size)| {
-            cursor.x >= position.x as f64
-                && cursor.x < (position.x + size.width as i32) as f64
-                && cursor.y >= position.y as f64
-                && cursor.y < (position.y + size.height as i32) as f64
-        })
-}
-
-fn widget_double_click_grace_period() -> Duration {
-    #[cfg(target_os = "windows")]
-    {
-        // Keep the panel alive through the user's configured double-click interval.
-        return Duration::from_millis(unsafe { GetDoubleClickTime() } as u64 + 50);
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        Duration::from_millis(550)
-    }
-}
-
-fn finish_panel_focus_loss_after(app: AppHandle, generation: u64, delay: Duration) {
-    std::thread::spawn(move || {
-        std::thread::sleep(delay);
-        let state = app.state::<AppState>();
-        if state.panel_resize_active.load(Ordering::Acquire) {
-            return;
-        }
-        let panel_focused = app
-            .get_webview_window("tray-panel")
-            .is_some_and(|panel| panel.is_focused().unwrap_or(false));
-        let widget_focused = app
-            .get_webview_window("widget")
-            .is_some_and(|widget| widget.is_focused().unwrap_or(false));
-        match state.window_visibility.panel_focus_loss_decision(
-            generation,
-            panel_focused,
-            widget_focused,
-        ) {
-            PanelFocusLossDecision::Cancel => return,
-            PanelFocusLossDecision::WaitForDoubleClick => {
-                std::thread::sleep(widget_double_click_grace_period());
-            }
-            PanelFocusLossDecision::Hide => {}
-        }
-
-        let state = app.state::<AppState>();
-        if state.panel_resize_active.load(Ordering::Acquire) {
-            return;
-        }
-        let panel_focused = app
-            .get_webview_window("tray-panel")
-            .is_some_and(|panel| panel.is_focused().unwrap_or(false));
-        if state.window_visibility.panel_focus_loss_decision(
-            generation,
-            panel_focused,
-            false,
-        ) == PanelFocusLossDecision::Hide
-        {
-            if let Some(panel) = app.get_webview_window("tray-panel") {
-                let _ = panel.hide();
-            }
-        }
-    });
-}
-
 async fn fetch_quota_snapshot(
     client: reqwest::Client,
     simulate_short_window_for_testing: bool,
+    quota_cache_path: PathBuf,
 ) -> Vec<ProviderSnapshot> {
+    let auth = quota_cache::current_auth_context();
     let mut snapshot = codex::fetch_snapshot(&client, true).await;
+    if auth.as_ref().is_some_and(|context| !quota_cache::auth_is_current(context)) {
+        return vec![ProviderSnapshot::failure("signed_out", "Login changed. It will retry automatically.")];
+    }
+    if let Err(error) =
+        quota_cache::update_from_fetch(quota_cache_path, vec![snapshot.clone()], auth.clone()).await
+    {
+        eprintln!("quota cache update failed: {error}");
+    }
     let usage_task = tokio::task::spawn_blocking(local_usage::collect_local_usage);
     let exchange_rate = local_usage::fetch_usd_cny_rate(&client).await;
     snapshot.local_usage = usage_task
@@ -451,6 +303,9 @@ async fn fetch_quota_snapshot(
     if let (Some(usage), Some((rate, date))) = (&mut snapshot.local_usage, exchange_rate) {
         usage.usd_cny_rate = rate;
         usage.exchange_rate_date = date;
+    }
+    if auth.as_ref().is_some_and(|context| !quota_cache::auth_is_current(context)) {
+        return vec![ProviderSnapshot::failure("signed_out", "Login changed. It will retry automatically.")];
     }
     let mut values = vec![snapshot];
     #[cfg(debug_assertions)]
@@ -514,6 +369,7 @@ async fn refresh_quota_for_app(app: AppHandle) -> QuotaState {
     let coordinator = app.state::<QuotaCoordinator>().inner().clone();
     let state = app.state::<AppState>();
     let client = state.client.clone();
+    let quota_cache_path = state.quota_cache_path.clone();
     #[cfg(debug_assertions)]
     let simulate = state
         .simulate_short_window_for_testing
@@ -523,7 +379,7 @@ async fn refresh_quota_for_app(app: AppHandle) -> QuotaState {
     #[cfg(not(debug_assertions))]
     let simulate = false;
     coordinator
-        .refresh_with(move || fetch_quota_snapshot(client, simulate))
+        .refresh_with(move || fetch_quota_snapshot(client, simulate, quota_cache_path))
         .await
 }
 
@@ -561,6 +417,11 @@ fn start_quota_background_tasks(app: AppHandle) {
     let mut changed = coordinator.subscribe();
     let mut schedule_changed = coordinator.subscribe();
     let event_app = app.clone();
+    let expiry_coordinator = coordinator.clone();
+    let cache_auth = app.state::<AppState>().startup_cache_auth.clone();
+    tauri::async_runtime::spawn(async move {
+        expiry_coordinator.expire_cached_while(move || cache_auth.as_ref().is_some_and(quota_cache::auth_is_current)).await;
+    });
     tauri::async_runtime::spawn(async move {
         while let Some(state) = quota::recv_next_state(&mut changed).await {
             let _ = event_app.emit("quota-state-changed", state);
@@ -991,129 +852,6 @@ mod geometry_tests {
     }
 }
 
-#[cfg(test)]
-mod window_visibility_tests {
-    use super::{PanelFocusLossDecision, WindowVisibilityCoordinator};
-    use std::sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc, Barrier,
-    };
-
-    #[test]
-    fn concurrent_external_show_cannot_override_newer_user_hide() {
-        for _ in 0..256 {
-            let coordinator = Arc::new(WindowVisibilityCoordinator::default());
-            let widget_visible = Arc::new(AtomicBool::new(true));
-            let panel_visible = Arc::new(AtomicBool::new(true));
-            let start = Arc::new(Barrier::new(3));
-
-            let show_coordinator = Arc::clone(&coordinator);
-            let show_widget_visible = Arc::clone(&widget_visible);
-            let show_start = Arc::clone(&start);
-            let show = std::thread::spawn(move || {
-                show_start.wait();
-                show_coordinator.with_external_widget_show(|| {
-                    show_widget_visible.store(true, Ordering::Release);
-                });
-            });
-
-            let hide_coordinator = Arc::clone(&coordinator);
-            let hide_widget_visible = Arc::clone(&widget_visible);
-            let hide_panel_visible = Arc::clone(&panel_visible);
-            let hide_start = Arc::clone(&start);
-            let hide = std::thread::spawn(move || {
-                hide_start.wait();
-                hide_coordinator.with_user_widget_visibility(false, || {
-                    hide_panel_visible.store(false, Ordering::Release);
-                    hide_widget_visible.store(false, Ordering::Release);
-                });
-            });
-
-            start.wait();
-            show.join().unwrap();
-            hide.join().unwrap();
-            assert!(!widget_visible.load(Ordering::Acquire));
-            assert!(!panel_visible.load(Ordering::Acquire));
-        }
-    }
-
-    #[test]
-    fn blur_then_widget_toggle_ends_with_the_panel_hidden() {
-        let coordinator = WindowVisibilityCoordinator::default();
-        let panel_visible = AtomicBool::new(true);
-        let blur_generation = coordinator.begin_panel_focus_loss();
-
-        coordinator.supersede_panel_focus_loss();
-        panel_visible.store(false, Ordering::Release);
-        let stale_blur = coordinator.panel_focus_loss_decision(
-            blur_generation,
-            false,
-            false,
-        );
-
-        assert_eq!(stale_blur, PanelFocusLossDecision::Cancel);
-        assert!(!panel_visible.load(Ordering::Acquire));
-    }
-
-    #[test]
-    fn widget_toggle_then_blur_ends_with_the_panel_hidden() {
-        let coordinator = WindowVisibilityCoordinator::default();
-        let panel_visible = AtomicBool::new(true);
-
-        coordinator.supersede_panel_focus_loss();
-        panel_visible.store(false, Ordering::Release);
-        let blur_generation = coordinator.begin_panel_focus_loss();
-        let delayed_blur = coordinator.panel_focus_loss_decision(
-            blur_generation,
-            false,
-            true,
-        );
-
-        assert_eq!(delayed_blur, PanelFocusLossDecision::WaitForDoubleClick);
-        assert!(!panel_visible.load(Ordering::Acquire));
-    }
-
-    #[test]
-    fn a_single_widget_click_hides_the_panel_after_the_double_click_grace() {
-        let coordinator = WindowVisibilityCoordinator::default();
-        let panel_visible = AtomicBool::new(true);
-        let blur_generation = coordinator.begin_panel_focus_loss();
-
-        let during_grace = coordinator.panel_focus_loss_decision(
-            blur_generation,
-            false,
-            true,
-        );
-        assert_eq!(during_grace, PanelFocusLossDecision::WaitForDoubleClick);
-        assert!(panel_visible.load(Ordering::Acquire));
-
-        let after_grace = coordinator.panel_focus_loss_decision(
-            blur_generation,
-            false,
-            false,
-        );
-        assert_eq!(after_grace, PanelFocusLossDecision::Hide);
-        panel_visible.store(false, Ordering::Release);
-        assert!(!panel_visible.load(Ordering::Acquire));
-    }
-
-    #[test]
-    fn refocused_panel_cannot_be_hidden_by_an_older_blur() {
-        let coordinator = WindowVisibilityCoordinator::default();
-        let panel_visible = AtomicBool::new(true);
-        let blur_generation = coordinator.begin_panel_focus_loss();
-
-        let delayed_blur = coordinator.panel_focus_loss_decision(
-            blur_generation,
-            true,
-            false,
-        );
-
-        assert_eq!(delayed_blur, PanelFocusLossDecision::Cancel);
-        assert!(panel_visible.load(Ordering::Acquire));
-    }
-}
-
 #[tauri::command]
 fn collapse_widget(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
     let window = app
@@ -1179,6 +917,7 @@ fn collapse_widget(app: AppHandle, state: State<'_, AppState>) -> Result<(), Str
 
 #[tauri::command]
 fn begin_widget_drag(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    quick_actions::close_widget_quick_actions(app.clone())?;
     let window = app
         .get_webview_window("widget")
         .ok_or_else(|| "widget window missing".to_string())?;
@@ -1468,54 +1207,31 @@ fn set_widget_always_on_top(
     Ok(next)
 }
 
-fn set_user_widget_visibility(
-    app: &AppHandle,
-    state: &AppState,
-    visible: bool,
-) -> Result<bool, String> {
-    state
-        .window_visibility
-        .with_user_widget_visibility(visible, || {
-            let widget = app
-                .get_webview_window("widget")
-                .ok_or_else(|| "widget window missing".to_string())?;
-            state.window_visibility.supersede_panel_focus_loss();
-            if visible {
-                widget.show().map_err(|error| error.to_string())?;
-                widget.set_focus().map_err(|error| error.to_string())?;
-                if !widget.is_visible().map_err(|error| error.to_string())? {
-                    return Err("widget remained hidden after show".to_string());
-                }
-                return Ok(true);
+fn set_floating_widget_visibility(app: &AppHandle, visible: bool) -> Result<bool, String> {
+    let widget = app.get_webview_window("widget").ok_or("widget window missing")?;
+    if visible {
+        widget.show().map_err(|e| e.to_string())?;
+        widget.set_focus().map_err(|e| e.to_string())?;
+    } else {
+        let mut first_error = None;
+        for label in ["quick-actions", "tray-panel", "widget"] {
+            if let Some(window) = app.get_webview_window(label) {
+                if let Err(error) = window.hide() { first_error.get_or_insert(error.to_string()); }
+                if window.is_visible().map_err(|e| e.to_string())? { first_error.get_or_insert(format!("{label} remained visible")); }
             }
-
-            let panel_error = app
-                .get_webview_window("tray-panel")
-                .and_then(|panel| panel.hide().err())
-                .map(|error| error.to_string());
-            let widget_error = widget.hide().err().map(|error| error.to_string());
-            if let Some(error) = widget_error.or(panel_error) {
-                return Err(error);
-            }
-            if widget.is_visible().map_err(|error| error.to_string())? {
-                return Err("widget remained visible after hide".to_string());
-            }
-            if let Some(panel) = app.get_webview_window("tray-panel") {
-                if panel.is_visible().map_err(|error| error.to_string())? {
-                    return Err("panel remained visible after widget hide".to_string());
-                }
-            }
-            Ok(false)
-        })
+        }
+        if let Some(error) = first_error { return Err(error); }
+    }
+    let actual = widget.is_visible().map_err(|e| e.to_string())?;
+    if actual != visible { return Err("window visibility did not change".to_string()); }
+    Ok(actual)
 }
 
 #[tauri::command]
-fn show_floating_widget(
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
-    set_user_widget_visibility(&app, &state, true).map(|_| ())
-}
+fn hide_floating_widget(app: AppHandle) -> Result<bool, String> { set_floating_widget_visibility(&app, false) }
+
+#[tauri::command]
+fn show_floating_widget(app: AppHandle) -> Result<(), String> { set_floating_widget_visibility(&app, true).map(|_| ()) }
 
 #[tauri::command]
 fn get_floating_widget_visible(app: AppHandle) -> Result<bool, String> {
@@ -1526,15 +1242,10 @@ fn get_floating_widget_visible(app: AppHandle) -> Result<bool, String> {
 }
 
 #[tauri::command]
-fn toggle_floating_widget(
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> Result<bool, String> {
-    let window = app
-        .get_webview_window("widget")
-        .ok_or_else(|| "widget window missing".to_string())?;
-    let visible = window.is_visible().map_err(|error| error.to_string())?;
-    set_user_widget_visibility(&app, &state, !visible)
+fn toggle_floating_widget(app: AppHandle) -> Result<bool, String> {
+    let window = app.get_webview_window("widget").ok_or("widget window missing")?;
+    let visible = window.is_visible().map_err(|e| e.to_string())?;
+    set_floating_widget_visibility(&app, !visible)
 }
 
 #[tauri::command]
@@ -1613,11 +1324,7 @@ fn resize_floating_widget(
 }
 
 #[tauri::command]
-fn toggle_panel_from_widget(
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> Result<bool, String> {
-    state.window_visibility.supersede_panel_focus_loss();
+fn toggle_panel_from_widget(app: AppHandle) -> Result<bool, String> {
     let widget = app
         .get_webview_window("widget")
         .ok_or_else(|| "widget window missing".to_string())?;
@@ -1782,10 +1489,7 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
     let test_short_window_menu = test_short_window.clone();
     builder
         .on_menu_event(move |app, event| match event.id.as_ref() {
-            "show" => {
-                let state = app.state::<AppState>();
-                let _ = toggle_floating_widget(app.clone(), state);
-            }
+            "show" => { let _ = toggle_floating_widget(app.clone()); }
             "refresh" => {
                 trigger_quota_refresh(app.clone());
             }
@@ -1926,23 +1630,24 @@ pub fn run() {
             }
         })
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
-            if let Some(state) = app.try_state::<AppState>() {
-                let _ = state.window_visibility.with_external_widget_show(|| {
-                    if let Some(window) = app.get_webview_window("widget") {
-                        let _ = window.show();
-                        let _ = window.set_focus();
-                    }
-                });
+            if let Some(window) = app.get_webview_window("widget") {
+                let _ = window.show();
+                let _ = window.set_focus();
             }
         }))
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
             None,
         ))
-        .plugin(WindowStateBuilder::default().build())
+        .plugin(WindowStateBuilder::default().with_denylist(&["quick-actions"]).build())
         .setup(|app| {
             let data_dir = app.path().app_config_dir()?;
             let preferences_path = data_dir.join("preferences.json");
+            let quota_cache_path = data_dir.join("quota-cache.json");
+            let startup_cache_auth = quota_cache::current_auth_context();
+            let cached_quota = startup_cache_auth.as_ref().and_then(|auth| quota_cache::load_for_auth(&quota_cache_path, auth));
+            if startup_cache_auth.is_none() { let _ = quota_cache::invalidate_for_missing_auth(&quota_cache_path); }
+            let quota_coordinator = cached_quota.map(|cache| QuotaCoordinator::with_cached_snapshots(cache.snapshots, cache.valid_for)).unwrap_or_default();
             let mut preferences = load_preferences(&preferences_path);
             preferences.voice_enabled = false;
             if preferences.screenshot_folder.is_empty() {
@@ -1962,15 +1667,16 @@ pub fn run() {
                 client,
                 preferences: Mutex::new(preferences.clone()),
                 preferences_path,
+                quota_cache_path,
+                startup_cache_auth,
                 #[cfg(debug_assertions)]
                 simulate_short_window_for_testing: Mutex::new(false),
                 geometry: Mutex::new(None),
                 drag_mode: Mutex::new(None),
-                window_visibility: WindowVisibilityCoordinator::default(),
                 panel_resize_active: AtomicBool::new(false),
                 panel_resize_generation: AtomicU64::new(0),
             });
-            app.manage(QuotaCoordinator::new());
+            app.manage(quota_coordinator);
             start_quota_background_tasks(app.handle().clone());
             app.manage(VoiceManager::new(voice_model_dir));
             app.manage(screenshot::ScreenshotManager::default());
@@ -2011,6 +1717,9 @@ pub fn run() {
             show_floating_widget,
             get_floating_widget_visible,
             toggle_floating_widget,
+            hide_floating_widget,
+            quick_actions::show_widget_quick_actions,
+            quick_actions::close_widget_quick_actions,
             set_widget_position_locked,
             resize_floating_widget,
             begin_panel_resize,
@@ -2036,7 +1745,7 @@ pub fn run() {
         .on_window_event(|window, event| {
             match event {
                 WindowEvent::CloseRequested { api, .. }
-                    if window.label() == "widget" || window.label() == "tray-panel" => {
+                    if window.label() == "widget" || window.label() == "tray-panel" || window.label() == "quick-actions" => {
                     api.prevent_close();
                     let _ = window.hide();
                 }
@@ -2057,24 +1766,26 @@ pub fn run() {
                     screenshot::remove_pin(&manager, window.label());
                 }
                 WindowEvent::Focused(false) if window.label() == "tray-panel" => {
-                    let state = window.state::<AppState>();
-                    let resizing = state.panel_resize_active.load(Ordering::Acquire);
-                    let cursor_inside_panel = cursor_is_inside_window(window);
-                    if !resizing && !cursor_inside_panel {
-                        let generation = state.window_visibility.begin_panel_focus_loss();
-                        finish_panel_focus_loss_after(
-                            window.app_handle().clone(),
-                            generation,
-                            Duration::from_millis(80),
-                        );
+                    let resizing = window
+                        .state::<AppState>()
+                        .panel_resize_active
+                        .load(Ordering::Acquire);
+                    let cursor_inside = window
+                        .cursor_position()
+                        .ok()
+                        .zip(window.outer_position().ok())
+                        .zip(window.outer_size().ok())
+                        .is_some_and(|((cursor, position), size)| {
+                            cursor.x >= position.x as f64
+                                && cursor.x < (position.x + size.width as i32) as f64
+                                && cursor.y >= position.y as f64
+                                && cursor.y < (position.y + size.height as i32) as f64
+                        });
+                    if !resizing && !cursor_inside {
+                        let _ = window.hide();
                     }
                 }
-                WindowEvent::Focused(true) if window.label() == "tray-panel" => {
-                    window
-                        .state::<AppState>()
-                        .window_visibility
-                        .supersede_panel_focus_loss();
-                }
+                WindowEvent::Focused(false) if window.label() == "quick-actions" => { let _ = window.hide(); }
                 WindowEvent::Resized(_) if window.label() == "tray-panel" => {
                     let state = window.state::<AppState>();
                     if state.panel_resize_active.load(Ordering::Acquire) {

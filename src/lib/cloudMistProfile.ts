@@ -15,11 +15,9 @@ export function getCloudMistProfile(level: number): CloudMistProfile {
     // Keep visible headroom below 100%. A truly full quota overscans the rim
     // so the antialiased edge has no empty strip.
     visualFraction: quota <= 0 ? 0 : quota >= 1 ? 1.08 : quota * .94,
-    // Quota controls the visible height only. Keep non-empty mist equally white
-    // and dense so lower remaining levels do not expose more of the gray base.
-    cloudCount: quota <= 0 ? 0 : 8,
-    cloudAlpha: quota <= 0 ? 0 : .46,
-    lowerCloudCount: quota <= 0 ? 0 : 5,
-    lowerCloudAlpha: quota <= 0 ? 0 : .3,
+    cloudCount: quota <= 0 ? 0 : 4 + Math.round(quota * 4),
+    cloudAlpha: quota <= 0 ? 0 : .32 + quota * .14,
+    lowerCloudCount: quota <= 0 ? 0 : 3 + Math.round(quota * 2),
+    lowerCloudAlpha: quota <= 0 ? 0 : .2 + quota * .1,
   };
 }

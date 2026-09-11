@@ -32,25 +32,36 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe("Spark quota orb interaction", () => {
-  it("switches on a stationary click and returns after five fully-visible seconds", async () => {
+describe("Original orb with Spark removed and independent quick menu", () => {
+  it("keeps Codex quota after stationary clicks even when Spark data exists", async () => {
     const onDrag = vi.fn();
     render(<QuotaOrb snapshot={snapshot} language="en" onDrag={onDrag} onHover={() => undefined} />);
     const orb = screen.getByLabelText("Weekly quota remaining 91%");
-
     fireEvent.mouseDown(orb, { button: 0, buttons: 1, clientX: 20, clientY: 20, detail: 1 });
     fireEvent.mouseUp(orb, { button: 0, buttons: 0, clientX: 20, clientY: 20, detail: 1 });
-    expect(onDrag).not.toHaveBeenCalled();
-
-    await act(async () => { await vi.advanceTimersByTimeAsync(600); });
-    const sparkOrb = screen.getByLabelText("Spark weekly quota remaining 98%");
-    expect(sparkOrb.classList.contains("quota-orb--spark")).toBe(true);
-
-    await act(async () => { await vi.advanceTimersByTimeAsync(5_339); });
-    expect(screen.getByLabelText("Spark weekly quota remaining 98%")).toBeTruthy();
-
-    await act(async () => { await vi.advanceTimersByTimeAsync(341); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
     expect(screen.getByLabelText("Weekly quota remaining 91%")).toBeTruthy();
+    expect(screen.queryByLabelText(/Spark weekly/)).toBeNull();
+    expect(onDrag).not.toHaveBeenCalled();
+    expect(orb.querySelector(".orb-bubble-cloud")).toBeTruthy();
+    expect(orb.querySelector(".orb-switch-cloud")?.className).toBe("orb-switch-cloud orb-switch-cloud--idle");
+  });
+
+  it("opens the separate menu without changing orb layout or starting a drag", async () => {
+    const onOpenQuickActions = vi.fn();
+    const onDrag = vi.fn();
+    render(<QuotaOrb snapshot={snapshot} language="en" onDrag={onDrag} onHover={() => undefined} onOpenQuickActions={onOpenQuickActions} />);
+    const orb = screen.getByLabelText("Weekly quota remaining 91%");
+    const originalStyle = orb.getAttribute("style");
+    fireEvent.mouseDown(orb, { button: 0, buttons: 1, clientX: 20, clientY: 20, detail: 1 });
+    const nativeMenuAllowed = fireEvent.contextMenu(orb);
+    fireEvent.mouseMove(orb, { buttons: 1, clientX: 50, clientY: 20 });
+    expect(nativeMenuAllowed).toBe(false);
+    expect(onOpenQuickActions).toHaveBeenCalledTimes(1);
+    expect(onDrag).not.toHaveBeenCalled();
+    expect(orb.getAttribute("style")).toBe(originalStyle);
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+    expect(screen.queryByLabelText(/Spark weekly/)).toBeNull();
   });
 
   it("starts dragging past four pixels without switching quota", async () => {
