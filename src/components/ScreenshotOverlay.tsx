@@ -12,6 +12,7 @@ import {
   X,
 } from "@phosphor-icons/react";
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { join } from "@tauri-apps/api/path";
 import annotationMoveCursor from "../assets/annotation-move-cursor.svg";
 import {
   activateScreenshot,
@@ -183,12 +184,15 @@ export function ScreenshotOverlay() {
   const suppressSelectionClick = useRef(false);
   const currentSessionId = useRef<number | null>(null);
   const activatedSessionId = useRef<number | null>(null);
+  const cancelPendingReveal = useRef<() => void>(() => undefined);
+  const mounted = useRef(true);
 
   useEffect(() => {
     actionsRef.current = actions;
   }, [actions]);
 
   useEffect(() => {
+    mounted.current = true;
     let disposed = false;
     let requestRevision = 0;
     let latestSessionId = 0;
@@ -210,8 +214,10 @@ export function ScreenshotOverlay() {
         });
     };
     const loadCapture = (sessionId: number, showError = true) => {
+      if (!Number.isSafeInteger(sessionId) || sessionId <= 0) return;
       if (sessionId <= latestSessionId) return;
       latestSessionId = sessionId;
+      cancelPendingReveal.current();
       currentSessionId.current = sessionId;
       activatedSessionId.current = null;
       setCapture(null);
@@ -235,12 +241,21 @@ export function ScreenshotOverlay() {
       setError("");
       requestCapture(showError, sessionId);
     };
-    requestCapture(false);
-    void import("@tauri-apps/api/event").then(({ listen }) => listen<number>("screenshot-capture-ready", (event) => loadCapture(event.payload))).then((cleanup) => {
-      if (disposed) cleanup(); else unlisten = cleanup;
-    });
+    void import("@tauri-apps/api/event")
+      .then(({ listen }) => listen<number>("screenshot-capture-ready", (event) => loadCapture(event.payload)))
+      .then((cleanup) => {
+        if (disposed) cleanup();
+        else {
+          unlisten = cleanup;
+          if (latestSessionId === 0) requestCapture(false);
+        }
+      })
+      .catch(() => { if (!disposed && latestSessionId === 0) requestCapture(false); });
     return () => {
       disposed = true;
+      mounted.current = false;
+      currentSessionId.current = null;
+      cancelPendingReveal.current();
       unlisten();
     };
   }, []);
@@ -322,33 +337,50 @@ export function ScreenshotOverlay() {
     setImageRevision((value) => value + 1);
     if (activatedSessionId.current === sessionId) return;
     activatedSessionId.current = sessionId;
-    const isCurrentSession = () => currentSessionId.current === sessionId && activatedSessionId.current === sessionId;
-    window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(() => {
+    const isCurrentSession = () => mounted.current && currentSessionId.current === sessionId && activatedSessionId.current === sessionId;
+    // The image is decoded at onLoad. An offscreen macOS WebView may pause animation
+    // frames, so move the native window first and bound only the paint wait.
+    void activateScreenshot(sessionId)
+      .then((activeSessionId) => {
         if (!isCurrentSession()) return;
-        void activateScreenshot(sessionId)
-          .then((activeSessionId) => {
-            window.requestAnimationFrame(() => {
-              window.requestAnimationFrame(() => {
-                if (!isCurrentSession()) return;
-                void revealScreenshot(activeSessionId).catch((value) => {
-                  if (isCurrentSession()) setError(String(value));
-                });
-              });
-            });
-          })
-          .catch((value) => {
+        let finished = false;
+        let firstFrame: number | undefined;
+        let secondFrame: number | undefined;
+        let fallbackTimer: number | undefined;
+        const cancel = () => {
+          finished = true;
+          if (fallbackTimer !== undefined) window.clearTimeout(fallbackTimer);
+          if (typeof window.cancelAnimationFrame === "function") {
+            if (firstFrame !== undefined) window.cancelAnimationFrame(firstFrame);
+            if (secondFrame !== undefined) window.cancelAnimationFrame(secondFrame);
+          }
+        };
+        cancelPendingReveal.current = cancel;
+        const reveal = () => {
+          if (finished) return;
+          cancel();
+          if (!isCurrentSession()) return;
+          void revealScreenshot(activeSessionId).catch((value) => {
             if (isCurrentSession()) setError(String(value));
           });
+        };
+        fallbackTimer = window.setTimeout(reveal, 120);
+        firstFrame = window.requestAnimationFrame(() => {
+          secondFrame = window.requestAnimationFrame(reveal);
+        });
+      })
+      .catch((value) => {
+        if (isCurrentSession()) setError(String(value));
       });
-    });
   };
 
   const cancelCurrentScreenshot = () => {
     const sessionId = currentSessionId.current;
     if (sessionId === null) return;
+    currentSessionId.current = null;
+    cancelPendingReveal.current();
     void cancelScreenshot(sessionId).catch((value) => {
-      if (currentSessionId.current === sessionId) setError(String(value));
+      if (mounted.current && currentSessionId.current === null) setError(String(value));
     });
   };
 
@@ -357,7 +389,13 @@ export function ScreenshotOverlay() {
     let disposed = false;
     const heartbeat = () => {
       void heartbeatScreenshot(capture.sessionId)
-        .then((alive) => { if (!alive && !disposed) setCapture(null); })
+        .then((alive) => {
+          if (!alive && !disposed) {
+            currentSessionId.current = null;
+            cancelPendingReveal.current();
+            setCapture(null);
+          }
+        })
         .catch(() => undefined);
     };
     heartbeat();
@@ -594,14 +632,15 @@ export function ScreenshotOverlay() {
       if (mode === "save-as") {
         const preferences = await getPreferences();
         if (!isCurrentSession()) return;
-        const separator = preferences.screenshotFolder.endsWith("\\") ? "" : "\\";
         const stamp = new Date().toISOString().replace(/[:T]/g, "-").slice(0, 19);
+        const defaultPath = await join(preferences.screenshotFolder, `Token-Bubble_${stamp}.png`);
+        if (!isCurrentSession()) return;
         let dialogOpened = false;
         try {
           await setScreenshotDialogMode(sessionId, true);
           dialogOpened = true;
           if (!isCurrentSession()) return;
-          targetPath = await chooseScreenshotFile(`${preferences.screenshotFolder}${separator}Token-Bubble_${stamp}.png`);
+          targetPath = await chooseScreenshotFile(defaultPath);
         } finally {
           if (dialogOpened) {
             try {

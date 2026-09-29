@@ -1,70 +1,23 @@
 # 发布说明
 
-## 当前发布目标
+## 本次 Mac 发布
 
-Token Bubble 使用同一套 React/CSS/Tauri 代码构建 Windows 和 macOS 版本。视觉效果、悬浮球、展开卡片、透明度、圆角和动画参数都应保持在共享前端代码中，避免维护 Windows/macOS 两套 UI。
+Mac 无语音源码保存在同一仓库的 `codex/macos-no-voice` 分支；`main` 和现有 Windows 发布保持原样。本次使用非 `v` 前缀标签 `macos-20260929-no-voice` 创建专用 GitHub Release，上传从现有已安装 App 制作的 `Token-Bubble_0.2.2_macos-arm64_20260929.dmg`、`SHA256SUMS.txt` 和 `INSTALL-macOS-zh-CN.txt`，不重新构建应用。
 
-当前发布默认输出 unsigned 包：
+DMG 内为 Token Bubble 0.2.2，要求 Apple Silicon（arm64）和 macOS 14 或更新版本。应用使用 ad-hoc 签名，未经过 Apple Developer ID 签名或公证；不支持声明为 Universal 或 Intel 版本。语音识别、麦克风入口和本地语音模型均已从运行版移除。
 
-- `token-bubble-windows-unsigned.zip`
-- `token-bubble-macos-universal-unsigned.zip`
+推送 `v*` 标签会触发 `.github/workflows/release.yml` 自动构建并**直接公开** Release；本次专用标签不匹配该触发条件。不要使用 `v*` 标签代替本次标签，也不要将 Mac 分支推送到 `main`。
 
-macOS 包使用 Universal 构建，同时支持 Apple Silicon 和 Intel Mac。
+## 已验证与待验证
 
-## 发布一个 GitHub 下载版本
+- 该代码版本的前端 149 项测试、Rust 61 项测试、生产构建、arm64 App 打包和深度签名校验曾通过。
+- DMG 已通过 `hdiutil verify` 和只读挂载检查；挂载 App 的 15 个文件与已安装 App 的 SHA-256 均一致，深度签名校验通过。DMG 的 SHA-256 为 `9f0828de3fc1c8e11e8b6ab5f34ecffe5af050bfd65b27beaa0e3314476fa8c5`。
+- 更换图标前的签名包，在实机完成截图选区、矩形标注、保存和剪贴板复制；更换图标后重新签名的安装包尚未完成录屏权限复测。
+- 贴图窗口可见性及交互、CodexScope 网页界面显示尚未实机确认。CodexScope 命令行生成真实数据已通过。
+- Developer ID 签名、公证、Intel Mac、异构多屏行为未验证。
 
-推送 `v*` tag 会触发 `.github/workflows/release.yml`，构建 Windows unsigned 包和 macOS Universal unsigned 包，并上传到草稿 GitHub Release。
+## Mac 安装提示
 
-```bash
-git tag v0.1.0
-git push origin v0.1.0
-```
+打开 DMG，将 App 拖到「应用程序」。首次运行可能被 Gatekeeper 阻止；可在 Finder 中右键 App 选择「打开」，必要时到「系统设置 → 隐私与安全性」允许打开。截图需要在「屏幕与系统音频录制」中授权当前 App；ad-hoc 签名变化后可能需要重新授权。
 
-工作流完成后，到 GitHub Releases 检查草稿发布，确认说明和附件后手动发布。
-
-## CI 与构建
-
-`.github/workflows/ci.yml` 会在 push/PR 时执行：
-
-- 前端测试、前端构建、npm audit。
-- Windows 桌面测试和 Tauri build。
-- macOS 桌面测试和 Tauri Universal build。
-
-macOS CI/release 会显式安装：
-
-- `aarch64-apple-darwin`
-- `x86_64-apple-darwin`
-
-并使用：
-
-```bash
-npm run tauri -- build --target universal-apple-darwin
-```
-
-## macOS unsigned 包使用说明
-
-因为当前 macOS 包未签名、未公证，首次打开时 Gatekeeper 可能会阻止启动。小范围测试用户可以使用以下方式打开：
-
-1. 解压下载的 macOS zip。
-2. 将应用移动到 Applications 或任意测试目录。
-3. 右键点击应用，选择 Open。
-4. 在系统提示中再次选择 Open。
-
-如果系统仍然阻止，可以在 System Settings -> Privacy & Security 中允许打开该应用。
-
-## 签名与公证
-
-Unsigned 包可以用于内部测试或小范围分发，但公开分发建议补齐签名与公证：
-
-- Windows：代码签名证书，避免 SmartScreen 或未知发布者提示。
-- macOS：Apple Developer ID Application 证书、Team ID、app-specific password，并完成 notarization。
-- CI：将证书、密码和 Team ID 放入 GitHub Secrets，再在 release workflow 中加入签名和公证步骤。
-
-证书和账号凭据不能由代码仓库生成，需要由项目所有者购买、申请或配置。
-
-## 跨平台维护原则
-
-- 后续效果调整默认只改共享前端代码。
-- 平台差异只放在桌面壳层，例如托盘、置顶、拖动、点击穿透、开机启动。
-- 不默认启用原生窗口级 Acrylic/Vibrancy；它会作用于整个窗口矩形，不符合只让圆角悬浮球卡片产生毛玻璃效果的设计目标。
-- Codex 登录态读取继续使用 `CODEX_HOME` 或用户目录 `.codex/auth.json`，Windows/macOS 共用同一逻辑。
+源码范围、构建方式及功能边界见 [Mac 移植说明](MACOS-PORT.md)。公开分发若需更顺畅的首次安装体验，应另行完成 Developer ID 签名和公证。

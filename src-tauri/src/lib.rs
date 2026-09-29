@@ -1,17 +1,17 @@
 mod codex;
+#[cfg(target_os = "macos")]
+mod codexscope;
 mod local_usage;
 mod models;
 mod quota;
 mod quota_cache;
 mod quick_actions;
 mod screenshot;
-mod voice;
 
 use std::{
     fs,
     io::Write,
     path::{Path, PathBuf},
-    process::Command,
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
         Mutex,
@@ -31,8 +31,9 @@ use tauri::{
 };
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
-use tauri_plugin_window_state::Builder as WindowStateBuilder;
-use voice::VoiceManager;
+use tauri_plugin_window_state::{Builder as WindowStateBuilder, StateFlags};
+#[cfg(target_os = "windows")]
+use std::process::Command;
 
 const DEFAULT_COLLAPSED_LOGICAL_SIZE: f64 = 68.0;
 const MIN_COLLAPSED_LOGICAL_SIZE: f64 = 52.0;
@@ -46,42 +47,7 @@ const TRAY_PANEL_LOGICAL_WIDTH: f64 = 380.0;
 const TRAY_PANEL_LOGICAL_HEIGHT: f64 = 504.0;
 const TRAY_PANEL_GAP_LOGICAL: f64 = 10.0;
 
-#[tauri::command]
-fn start_voice(app: AppHandle, voice: State<'_, VoiceManager>, state: State<'_, AppState>) -> Result<bool, String> {
-    let target = voice::preferred_text_target();
-    let preferences = state
-        .preferences
-        .lock()
-        .map_err(|_| "语音输入设置不可用".to_string())?;
-    let input_device = preferences.voice_input_device.clone();
-    let sensitivity = preferences.voice_sensitivity;
-    let endpoint_seconds = preferences.voice_endpoint_seconds;
-    let punctuation_enabled = preferences.voice_punctuation_enabled;
-    drop(preferences);
-    if let Some(panel) = app.get_webview_window("tray-panel") {
-        let _ = panel.hide();
-    }
-    voice::focus_text_target(target);
-    voice.start(
-        app,
-        target,
-        input_device,
-        sensitivity,
-        endpoint_seconds,
-        punctuation_enabled,
-    )
-}
-
-#[tauri::command]
-fn stop_voice(voice: State<'_, VoiceManager>) {
-    voice.stop();
-}
-
-#[tauri::command]
-fn get_voice_input_devices() -> Result<Vec<String>, String> {
-    voice::input_device_names()
-}
-
+#[cfg(any(target_os = "windows", test))]
 fn copy_directory(source: &Path, target: &Path) -> Result<(), String> {
     fs::create_dir_all(target).map_err(|error| error.to_string())?;
     for entry in fs::read_dir(source).map_err(|error| error.to_string())? {
@@ -101,6 +67,7 @@ fn copy_directory(source: &Path, target: &Path) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(not(target_os = "macos"))]
 fn open_codexscope(app: &AppHandle) -> Result<(), String> {
     #[cfg(not(target_os = "windows"))]
     {
@@ -1059,7 +1026,6 @@ fn set_preferences(
     preferences: WidgetPreferences,
     app: AppHandle,
     state: State<'_, AppState>,
-    voice: State<'_, VoiceManager>,
 ) -> Result<(), String> {
     let preferences = preferences.normalized();
     let mut stored_preferences = state
@@ -1067,13 +1033,6 @@ fn set_preferences(
         .lock()
         .map_err(|_| "settings unavailable".to_string())?;
     let previous = stored_preferences.clone();
-    let restart_voice = (previous.voice_enabled != preferences.voice_enabled)
-        || (previous.voice_input_device != preferences.voice_input_device)
-        || (previous.voice_sensitivity != preferences.voice_sensitivity)
-        || (previous.voice_endpoint_seconds != preferences.voice_endpoint_seconds)
-        || (previous.voice_punctuation_enabled != preferences.voice_punctuation_enabled);
-    let should_start_voice = !previous.voice_enabled && preferences.voice_enabled;
-    let should_stop_voice = previous.voice_enabled && !preferences.voice_enabled;
     let previous_shortcut = previous.screenshot_shortcut.clone();
     let shortcut_changed = previous_shortcut != preferences.screenshot_shortcut;
     let previous_shortcut_registered = shortcut_changed
@@ -1122,14 +1081,6 @@ fn set_preferences(
     *stored_preferences = preferences.clone();
     drop(stored_preferences);
     let _ = app.emit("preferences-changed", preferences.clone());
-    if restart_voice {
-        if should_stop_voice || (previous.voice_enabled && preferences.voice_enabled) {
-            voice.stop();
-        }
-        if should_start_voice || (previous.voice_enabled && preferences.voice_enabled) {
-            start_voice(app, voice, state)?;
-        }
-    }
     Ok(())
 }
 
@@ -1137,8 +1088,17 @@ fn register_screenshot_shortcut(app: &AppHandle, shortcut: &str) -> Result<(), S
     app.global_shortcut()
         .on_shortcut(shortcut, |app, _, event| {
             if event.state == ShortcutState::Pressed {
-                let manager = app.state::<screenshot::ScreenshotManager>();
-                let _ = screenshot::begin_screenshot(app.clone(), manager);
+                screenshot::log_event(app, "global shortcut pressed");
+                let app = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Err(error) = screenshot::begin_screenshot(app.clone()).await {
+                        use tauri_plugin_dialog::DialogExt;
+                        app.dialog().message(error)
+                            .title("Token Bubble 截图")
+                            .kind(tauri_plugin_dialog::MessageDialogKind::Error)
+                            .show(|_| {});
+                    }
+                });
             }
         })
         .map_err(|error| format!("截图快捷键注册失败：{error}"))
@@ -1385,7 +1345,7 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
         app,
         "codexscope",
         "Open CodexScope verification",
-        cfg!(target_os = "windows"),
+        cfg!(any(target_os = "windows", target_os = "macos")),
         None::<&str>,
     )?;
     let update = MenuItem::with_id(app, "update", "Check for updates", true, None::<&str>)?;
@@ -1494,6 +1454,20 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
                 trigger_quota_refresh(app.clone());
             }
             "codexscope" => {
+                #[cfg(target_os = "macos")]
+                {
+                    let app = app.clone();
+                    tauri::async_runtime::spawn(async move {
+                        if let Err(error) = codexscope::open(app.clone()).await {
+                            use tauri_plugin_dialog::DialogExt;
+                            app.dialog().message(error)
+                                .title("CodexScope")
+                                .kind(tauri_plugin_dialog::MessageDialogKind::Error)
+                                .show(|_| {});
+                        }
+                    });
+                }
+                #[cfg(not(target_os = "macos"))]
                 if let Err(error) = open_codexscope(app) {
                     eprintln!("CodexScope launch failed: {error}");
                 }
@@ -1620,15 +1594,6 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
-        .on_page_load(|window, payload| {
-            if window.label() == "screenshot" && matches!(payload.event(), tauri::webview::PageLoadEvent::Finished) {
-                let app = window.app_handle().clone();
-                std::thread::spawn(move || {
-                    std::thread::sleep(Duration::from_millis(80));
-                    let _ = app.emit_to("screenshot", "screenshot-capture-ready", ());
-                });
-            }
-        })
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
             if let Some(window) = app.get_webview_window("widget") {
                 let _ = window.show();
@@ -1639,8 +1604,15 @@ pub fn run() {
             MacosLauncher::LaunchAgent,
             None,
         ))
-        .plugin(WindowStateBuilder::default().with_denylist(&["quick-actions"]).build())
+        .plugin(
+            WindowStateBuilder::default()
+                .with_state_flags(StateFlags::all() & !StateFlags::VISIBLE)
+                .with_denylist(&["quick-actions", "screenshot", "pin"])
+                .build(),
+        )
         .setup(|app| {
+            #[cfg(target_os = "macos")]
+            app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             let data_dir = app.path().app_config_dir()?;
             let preferences_path = data_dir.join("preferences.json");
             let quota_cache_path = data_dir.join("quota-cache.json");
@@ -1649,14 +1621,12 @@ pub fn run() {
             if startup_cache_auth.is_none() { let _ = quota_cache::invalidate_for_missing_auth(&quota_cache_path); }
             let quota_coordinator = cached_quota.map(|cache| QuotaCoordinator::with_cached_snapshots(cache.snapshots, cache.valid_for)).unwrap_or_default();
             let mut preferences = load_preferences(&preferences_path);
-            preferences.voice_enabled = false;
             if preferences.screenshot_folder.is_empty() {
                 preferences.screenshot_folder = screenshot::default_screenshot_folder()
                     .to_string_lossy()
                     .into_owned();
                 let _ = persist_preferences(&preferences_path, &preferences);
             }
-            let voice_model_dir = app.path().resource_dir()?.join("asr");
             let client = reqwest::Client::builder()
                 .timeout(Duration::from_secs(12))
                 .redirect(reqwest::redirect::Policy::none())
@@ -1678,10 +1648,16 @@ pub fn run() {
             });
             app.manage(quota_coordinator);
             start_quota_background_tasks(app.handle().clone());
-            app.manage(VoiceManager::new(voice_model_dir));
             app.manage(screenshot::ScreenshotManager::default());
             if let Err(error) = register_screenshot_shortcut(app.handle(), &preferences.screenshot_shortcut) {
-                eprintln!("{error}");
+                screenshot::log_event(app.handle(), &error);
+                use tauri_plugin_dialog::DialogExt;
+                app.dialog().message(format!("{error}\n可以从截图设置中的“开始截图”按钮启动截图，或更换快捷键。"))
+                    .title("Token Bubble 截图")
+                    .kind(tauri_plugin_dialog::MessageDialogKind::Error)
+                    .show(|_| {});
+            } else {
+                screenshot::log_event(app.handle(), &format!("global shortcut registered: {}", preferences.screenshot_shortcut));
             }
             if setup_tray(app).is_err() {
                 eprintln!("tray setup failed; enabling taskbar fallback");
@@ -1725,9 +1701,6 @@ pub fn run() {
             begin_panel_resize,
             end_panel_resize,
             toggle_panel_from_widget,
-            start_voice,
-            stop_voice,
-            get_voice_input_devices,
             screenshot::begin_screenshot,
             screenshot::activate_screenshot,
             screenshot::reveal_screenshot,

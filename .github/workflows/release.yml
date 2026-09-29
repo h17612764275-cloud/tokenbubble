@@ -17,7 +17,7 @@ jobs:
           - platform: windows-latest
             args: "--bundles nsis"
           - platform: macos-latest
-            args: "--target universal-apple-darwin"
+            args: "--target aarch64-apple-darwin --bundles app"
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
@@ -26,16 +26,13 @@ jobs:
           node-version: 22
           cache: npm
       - uses: dtolnay/rust-toolchain@stable
-      - name: Install macOS universal targets
+      - name: Install macOS Apple Silicon target
         if: runner.os == 'macOS'
-        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+        run: rustup target add aarch64-apple-darwin
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
       - run: npm ci
-      - name: Fetch verified local voice models
-        shell: pwsh
-        run: ./scripts/fetch-voice-models.ps1
       - run: npm test
       - run: npm run build
       - run: cargo test --manifest-path src-tauri/Cargo.toml

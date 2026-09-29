@@ -7,7 +7,7 @@ Token Bubble is designed to be local-first and minimal.
 - The app reads the local Codex Desktop login file from `CODEX_HOME/auth.json` or the user's `.codex/auth.json`.
 - The app sends the existing Codex access token only to the ChatGPT quota endpoints needed to read Codex usage.
 - The app may read the account identifier from the login file or token payload only to set the request header expected by the quota service.
-- When voice input is enabled, the app reads audio from the selected microphone for on-device speech recognition.
+- This build does not include voice recognition, access the microphone, or download speech models.
 - When the user starts a screenshot, the app reads the current monitor pixels and briefly enumerates visible top-level window process IDs, class names, and bounds to recommend local region selection and edge snapping.
 
 ## What It Stores
@@ -19,16 +19,12 @@ Token Bubble stores widget preferences and a bounded local usage history:
 - pinned provider
 - auto-rotate interval
 - daily quota percentages and token totals used by the local history view
-- daily dictated-character totals used by the local voice history view
 - screenshot shortcut and default output folder
 - PNG screenshots that the user explicitly confirms or saves
 
 This history stays in the app's local storage. The app does not copy or persist
 Codex access tokens, account IDs, raw quota responses, user prompts, chat
 content, or local auth paths.
-
-Microphone audio and recognized text are not written to disk. Only the final
-character count is added to the bounded local voice-usage history.
 
 Screenshot pixels are held locally for the active capture and pinned-image
 session. Confirmed screenshots are written only to the selected local folder
@@ -47,7 +43,6 @@ The app only calls these quota-related HTTPS endpoints from the local desktop pr
 - `https://chatgpt.com/backend-api/wham/rate-limit-reset-credits`
 
 No telemetry, analytics, crash reporting, or third-party tracking is included.
-Speech recognition and punctuation restoration do not make network requests.
 Screenshot capture, annotation, clipboard copy, and pinned-image display do not
 make network requests.
 

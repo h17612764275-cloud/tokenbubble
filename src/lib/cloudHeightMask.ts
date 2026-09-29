@@ -59,6 +59,14 @@ export function cloudMaskPixels(surface: CloudHeightSurface, target: CloudMaskRe
 
 // Static endpoints and reduced-motion masks can be reused.
 const maskCache = new Map<string, string>();
+function cloudMaskGradient(surface: CloudHeightSurface, target: CloudMaskRect): string {
+  if (surface.quota <= 0) return "linear-gradient(transparent, transparent)";
+  if (surface.quota >= 1) return "linear-gradient(#000, #000)";
+  const top = (surface.line - surface.feather - target.y) / target.height * 100;
+  const bottom = (surface.line + surface.feather - target.y) / target.height * 100;
+  return `linear-gradient(to bottom, transparent ${top}%, #000 ${bottom}%)`;
+}
+
 export function cloudMaskImage(surface: CloudHeightSurface, target: CloudMaskRect): string {
   const key = JSON.stringify([surface.quota, surface.width, surface.height, target]);
   const cached = maskCache.get(key);
@@ -66,13 +74,7 @@ export function cloudMaskImage(surface: CloudHeightSurface, target: CloudMaskRec
   const canvas = document.createElement("canvas");
   canvas.width = canvas.height = 256;
   const context = canvas.getContext("2d");
-  if (!context) {
-    if (surface.quota <= 0) return "linear-gradient(transparent, transparent)";
-    if (surface.quota >= 1) return "linear-gradient(#000, #000)";
-    const top = (surface.line - surface.feather - target.y) / target.height * 100;
-    const bottom = (surface.line + surface.feather - target.y) / target.height * 100;
-    return `linear-gradient(to bottom, transparent ${top}%, #000 ${bottom}%)`;
-  }
+  if (!context) return cloudMaskGradient(surface, target);
   const image = context.createImageData(256, 256);
   image.data.set(cloudMaskPixels(surface, target));
   context.putImageData(image, 0, 0);
@@ -82,26 +84,83 @@ export function cloudMaskImage(surface: CloudHeightSurface, target: CloudMaskRec
   return result;
 }
 
+// Keep the decoded image alive while its element uses it, including across renderer replacement.
+const decodedMasks = new WeakMap<HTMLElement, HTMLImageElement>();
+
 export function createCloudMaskRenderer(element: HTMLElement, surface: CloudHeightSurface, target: CloudMaskRect) {
   const canvas = document.createElement("canvas");
   canvas.width = canvas.height = 256;
   const context = canvas.getContext("2d");
   const image = context?.createImageData(256, 256);
   let lastTime = -Infinity;
-  let lastUrl = "";
+  let lastUrl = element.style.maskImage;
+  let decoding = false;
+  let queuedMotion: CloudHeightMotion | null = null;
+  let disposed = false;
   element.style.maskSize = "100% 100%";
   element.style.maskRepeat = "no-repeat";
-  return (motion: CloudHeightMotion, force = false) => {
+  if (!lastUrl) {
+    lastUrl = cloudMaskGradient(surface, target);
+    element.style.maskImage = lastUrl;
+  }
+  const render = (motion: CloudHeightMotion, force = false) => {
+    if (disposed) return;
     const dynamic = surface.quota > 0 && surface.quota < 1 && !motion.reducedMotion;
     const interval = motion.energy > .008 ? 16 : 50;
-    if (!force && ((!dynamic && lastUrl) || motion.time >= lastTime && motion.time - lastTime < interval)) return;
+    if (!force && ((!dynamic && (lastUrl || decoding)) || motion.time >= lastTime && motion.time - lastTime < interval)) return;
     lastTime = motion.time;
+    if (decoding) {
+      // Keep only the newest frame, but publish the current decode before starting it.
+      queuedMotion = { ...motion };
+      return;
+    }
     let url: string;
     if (dynamic && context && image) {
       cloudMaskPixels(surface, target, 256, motion, image.data);
       context.putImageData(image, 0, 0);
       url = `url(${canvas.toDataURL()})`;
     } else url = cloudMaskImage(surface, target);
-    if (url !== lastUrl) { element.style.maskImage = url; lastUrl = url; }
+    if (url === lastUrl) return;
+    if (!url.startsWith("url(")) {
+      element.style.maskImage = url;
+      lastUrl = url;
+      return;
+    }
+
+    const nextImage = new Image();
+    decoding = true;
+    const source = url.slice(4, -1);
+    let ready: Promise<unknown>;
+    if (typeof nextImage.decode === "function") {
+      nextImage.src = source;
+      ready = Promise.resolve().then(() => nextImage.decode());
+    } else {
+      ready = new Promise<void>((resolve, reject) => {
+        nextImage.onload = () => resolve();
+        nextImage.onerror = () => reject(new Error("Cloud mask image failed to load"));
+        nextImage.src = source;
+      });
+    }
+    void ready.then(() => {
+      if (disposed) return;
+      element.style.maskImage = url;
+      lastUrl = url;
+      decodedMasks.set(element, nextImage);
+    }, () => {
+      // A failed decode must leave the previous mask and image reference intact.
+    }).then(() => {
+      if (disposed) return;
+      decoding = false;
+      if (queuedMotion) {
+        const latest = queuedMotion;
+        queuedMotion = null;
+        render(latest, true);
+      }
+    });
   };
+  render.dispose = () => {
+    disposed = true;
+    queuedMotion = null;
+  };
+  return render;
 }

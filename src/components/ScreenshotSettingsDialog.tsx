@@ -1,6 +1,7 @@
-import { FolderSimple, X } from "@phosphor-icons/react";
+import { Camera, FolderSimple, X } from "@phosphor-icons/react";
 import { useEffect, useMemo, useState } from "react";
 import {
+  beginScreenshot,
   chooseScreenshotFolder,
   getDefaultScreenshotFolder,
   isGlobalShortcutRegistered,
@@ -22,6 +23,8 @@ export function ScreenshotSettingsDialog({ preferences, zh, onClose, onSave }: P
   const [draftFolder, setDraftFolder] = useState(preferences.screenshotFolder);
   const [capturing, setCapturing] = useState(false);
   const [error, setError] = useState("");
+  const [starting, setStarting] = useState(false);
+  const [startError, setStartError] = useState("");
 
   useEffect(() => {
     void getDefaultScreenshotFolder().then((folder) => {
@@ -45,10 +48,6 @@ export function ScreenshotSettingsDialog({ preferences, zh, onClose, onSave }: P
         setError(zh ? "请按下包含 Ctrl、Alt 或 Shift 的组合键" : "Use Ctrl, Alt, or Shift in the shortcut");
         return;
       }
-      if (shortcut === preferences.voiceShortcut) {
-        setError(zh ? "该快捷键已用于语音识别" : "This shortcut is already used by voice input");
-        return;
-      }
       void isGlobalShortcutRegistered(shortcut).then((registered) => {
         if (registered && shortcut !== preferences.screenshotShortcut) {
           setError(zh ? "该快捷键已被占用" : "This shortcut is already in use");
@@ -61,7 +60,7 @@ export function ScreenshotSettingsDialog({ preferences, zh, onClose, onSave }: P
     };
     window.addEventListener("keydown", handleKeyDown, true);
     return () => window.removeEventListener("keydown", handleKeyDown, true);
-  }, [capturing, preferences.screenshotShortcut, preferences.voiceShortcut, zh]);
+  }, [capturing, preferences.screenshotShortcut, zh]);
 
   useEffect(() => {
     const handleEscape = (event: globalThis.KeyboardEvent) => {
@@ -72,7 +71,7 @@ export function ScreenshotSettingsDialog({ preferences, zh, onClose, onSave }: P
   }, [capturing, onClose]);
 
   const folderLabel = useMemo(
-    () => draftFolder === defaultFolder ? `Token Bubble\\${zh ? "截图" : "Screenshots"}` : draftFolder,
+    () => draftFolder === defaultFolder ? `Token Bubble / ${zh ? "截图" : "Screenshots"}` : draftFolder,
     [defaultFolder, draftFolder, zh],
   );
 
@@ -83,9 +82,19 @@ export function ScreenshotSettingsDialog({ preferences, zh, onClose, onSave }: P
     setError("");
   };
 
+  const startScreenshot = () => {
+    if (starting) return;
+    setStarting(true);
+    setStartError("");
+    void beginScreenshot()
+      .then(onClose)
+      .catch((value) => setStartError(String(value)))
+      .finally(() => setStarting(false));
+  };
+
   return (
-    <div className="voice-shortcut-backdrop screenshot-settings-backdrop" onMouseDown={onClose}>
-      <section className="voice-shortcut-dialog screenshot-settings-dialog" role="dialog" aria-modal="true" aria-labelledby="screenshot-settings-title" onMouseDown={(event) => event.stopPropagation()}>
+    <div className="settings-dialog-backdrop screenshot-settings-backdrop" onMouseDown={onClose}>
+      <section className="settings-dialog screenshot-settings-dialog" role="dialog" aria-modal="true" aria-labelledby="screenshot-settings-title" onMouseDown={(event) => event.stopPropagation()}>
         <header>
           <div>
             <strong id="screenshot-settings-title">{zh ? "截图设置" : "Screenshot settings"}</strong>
@@ -95,14 +104,19 @@ export function ScreenshotSettingsDialog({ preferences, zh, onClose, onSave }: P
         </header>
 
         <div className="screenshot-settings__group">
-          <div className="voice-shortcut-current screenshot-settings__current">
+          <div className="settings-dialog-current screenshot-settings__current">
             <span>{zh ? "当前快捷键" : "Current shortcut"}</span>
             <kbd>{draftShortcut}</kbd>
           </div>
-          <button type="button" className={`voice-shortcut-capture${capturing ? " is-capturing" : ""}`} onClick={() => { setCapturing(true); setError(""); }}>
+          <button type="button" className={`settings-dialog-capture${capturing ? " is-capturing" : ""}`} onClick={() => { setCapturing(true); setError(""); }}>
             {capturing ? (zh ? "现在按下新的组合键…" : "Press the new shortcut…") : (zh ? "更改快捷键" : "Change shortcut")}
           </button>
           {error ? <p className="screenshot-settings__error" role="alert">{error}</p> : null}
+          <button type="button" className="settings-dialog-capture screenshot-settings__start" disabled={starting} onClick={startScreenshot}>
+            <Camera weight="duotone" />
+            {starting ? (zh ? "正在启动截图…" : "Starting capture…") : (zh ? "开始截图" : "Start capture")}
+          </button>
+          {startError ? <p className="screenshot-settings__error" role="alert">{startError}</p> : null}
         </div>
 
         <div className="screenshot-settings__group screenshot-settings__folder">

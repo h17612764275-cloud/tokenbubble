@@ -23,23 +23,16 @@ const events = vi.hoisted(() => ({
     return () => events.listeners.delete(name);
   }),
 }));
-const shortcut = vi.hoisted(() => ({
-  listener: null as null | ((event: { state: string }) => void),
-  register: vi.fn(async (_keys: string, listener: (event: { state: string }) => void) => { shortcut.listener = listener; }),
-  unregister: vi.fn(async () => undefined),
-}));
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: api.invoke }));
 vi.mock("@tauri-apps/api/event", () => ({ emitTo: events.emitTo, listen: events.listen }));
 vi.mock("@tauri-apps/api/window", () => ({ currentMonitor: api.currentMonitor, getCurrentWindow: api.getCurrentWindow }));
-vi.mock("@tauri-apps/plugin-global-shortcut", () => ({ register: shortcut.register, unregister: shortcut.unregister }));
 
 beforeEach(() => {
   vi.clearAllMocks();
   api.calls.length = 0;
   api.currentLabel = "widget";
   events.listeners.clear();
-  shortcut.listener = null;
   vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
 });
 
@@ -55,21 +48,6 @@ const recoveredSnapshot: ProviderSnapshot = {
   status: "ok" as const,
   message: null,
 };
-
-describe("voice shortcut", () => {
-  it("toggles once on press and does nothing on release", async () => {
-    const handler = vi.fn();
-    const { registerVoiceShortcut } = await import("./bridge");
-    const dispose = await registerVoiceShortcut("Ctrl+Space", handler);
-
-    shortcut.listener?.({ state: "Pressed" });
-    shortcut.listener?.({ state: "Released" });
-
-    expect(handler).toHaveBeenCalledOnce();
-    await dispose();
-    expect(shortcut.unregister).toHaveBeenCalledWith("Ctrl+Space");
-  });
-});
 
 describe("widget transitions", () => {
   it("passes the monitor work area to the Rust expansion command", async () => {
@@ -127,6 +105,7 @@ describe("quota state", () => {
 
     events.listeners.get("quota-state-changed")?.({ payload: quotaState });
     expect(onQuotaState).toHaveBeenCalledWith(quotaState);
+    expect(events.listeners.has("voice-event")).toBe(false);
     dispose();
   });
 
@@ -147,29 +126,6 @@ describe("quota state", () => {
 
     expect(unlistenPreferences).toHaveBeenCalledOnce();
     expect(unlistenUpdate).toHaveBeenCalledOnce();
-  });
-
-  it("cleans up every earlier listener when voice listener registration fails", async () => {
-    const unlistenPreferences = vi.fn();
-    const unlistenUpdate = vi.fn();
-    const unlistenQuota = vi.fn();
-    events.listen
-      .mockResolvedValueOnce(unlistenPreferences)
-      .mockResolvedValueOnce(unlistenUpdate)
-      .mockResolvedValueOnce(unlistenQuota)
-      .mockRejectedValueOnce(new Error("voice listener failed"));
-    const { listenDesktopEvents } = await import("./bridge");
-
-    await expect(listenDesktopEvents({
-      onPreferences: vi.fn(),
-      onUpdate: vi.fn(),
-      onQuotaState: vi.fn(),
-      onVoice: vi.fn(),
-    })).rejects.toThrow("voice listener failed");
-
-    expect(unlistenPreferences).toHaveBeenCalledOnce();
-    expect(unlistenUpdate).toHaveBeenCalledOnce();
-    expect(unlistenQuota).toHaveBeenCalledOnce();
   });
 
   it("does not use peer broadcasts for quota synchronization", async () => {

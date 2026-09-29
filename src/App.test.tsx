@@ -32,13 +32,10 @@ vi.mock("./lib/bridge", () => ({
   getPreferences: boundary.getPreferences,
   listenDesktopEvents: boundary.listenDesktopEvents,
   listenWidgetMotion: vi.fn(async () => () => undefined),
-  registerVoiceShortcut: vi.fn(async () => async () => undefined),
   resizeFloatingWidget: vi.fn(),
   setWidgetExpanded: vi.fn(async () => undefined),
   setWidgetPositionLocked: vi.fn(),
   startDragging: vi.fn(),
-  startVoice: vi.fn(async () => undefined),
-  stopVoice: vi.fn(async () => undefined),
   toggleFloatingWidget: vi.fn(),
   togglePanelFromWidget: vi.fn(),
   updatePreferences: vi.fn(async () => undefined),
@@ -64,12 +61,6 @@ const preferences: WidgetPreferences = {
   pinnedProvider: null,
   autoRotateSeconds: 12,
   language: "en",
-  voiceEndpointSeconds: 3,
-  voicePunctuationEnabled: false,
-  voiceEnabled: false,
-  voiceShortcut: "Ctrl+Space",
-  voiceInputDevice: null,
-  voiceSensitivity: 65,
   screenshotShortcut: "Ctrl+P",
   screenshotFolder: "",
 };
@@ -202,6 +193,26 @@ describe("backend-coordinated quota state", () => {
     render(<App />);
     const ring = await screen.findByRole("progressbar", { name: "Weekly quota remaining" });
     expect(ring.getAttribute("aria-valuenow")).toBe("99");
+    expect(screen.queryByRole("button", { name: /voice|语音|microphone|麦克风/i })).toBeNull();
+    expect(screen.getByLabelText("90 day token usage heatmap").querySelectorAll("i")).toHaveLength(91);
+  });
+
+  it("ignores legacy voice preferences and keeps the token heatmap active", async () => {
+    window.localStorage.clear();
+    boundary.getPreferences.mockResolvedValue({ ...preferences, voiceEnabled: true, voiceShortcut: "Ctrl+Space" });
+    const date = new Date();
+    const dateKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+    boundary.getQuotaState.mockResolvedValue(quotaState(1, {
+      ...recovered,
+      dailyTokenUsage: [{ date: dateKey, tokens: 1_000 }],
+    }));
+    (window as typeof window & { __TOKEN_BUBBLE_VIEW__?: string }).__TOKEN_BUBBLE_VIEW__ = "tray";
+
+    render(<App />);
+    const heatmap = await screen.findByLabelText("90 day token usage heatmap");
+    expect(heatmap.querySelector(`[title="${dateKey}: 1.0K"]`)?.className).toBe("heat-4");
+    expect(screen.queryByRole("button", { name: /voice|语音|microphone|麦克风/i })).toBeNull();
+    expect(boundary.desktopHandlers).not.toHaveProperty("onVoice");
   });
 
   it("recovers unavailable UI from quota-state-changed without peer broadcast", async () => {

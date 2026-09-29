@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     fs,
-    io::Cursor,
+    io::{Cursor, Write},
     path::{Path, PathBuf},
     process::Command,
     sync::{
@@ -15,6 +15,21 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use image::{DynamicImage, ImageFormat, RgbaImage};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
+
+#[cfg(target_os = "macos")]
+#[path = "screenshot_macos.rs"]
+mod screenshot_macos;
+
+// Local troubleshooting records contain lifecycle events only, never image data.
+pub(crate) fn log_event(app: &AppHandle, event: &str) {
+    let Ok(directory) = app.path().app_log_dir() else { return };
+    if fs::create_dir_all(&directory).is_err() { return; }
+    if let Ok(mut file) = fs::OpenOptions::new().create(true).append(true)
+        .open(directory.join("screenshot.log"))
+    {
+        let _ = writeln!(file, "{} {event}", now_millis());
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -177,6 +192,8 @@ struct ScreenCapture {
     height: u32,
     x: i32,
     y: i32,
+    // On macOS the PNG is in pixels while native windows occupy screen points.
+    logical_size: Option<(f64, f64)>,
     window_targets: Vec<WindowTarget>,
 }
 
@@ -192,6 +209,7 @@ pub(crate) struct ScreenshotManager {
     hidden_windows: Mutex<Option<HiddenWindows>>,
     lifecycle_lock: Mutex<()>,
     active: AtomicBool,
+    capturing: AtomicBool,
     revealed: AtomicBool,
     dialog_open: AtomicBool,
     session_id: AtomicU64,
@@ -240,6 +258,13 @@ pub(crate) struct FinishPayload {
 }
 
 pub(crate) fn default_screenshot_folder() -> PathBuf {
+    #[cfg(target_os = "macos")]
+    return dirs::picture_dir()
+        .or_else(|| dirs::home_dir().map(|home| home.join("Pictures")))
+        .unwrap_or_else(|| PathBuf::from("Pictures"))
+        .join("Token Bubble 截图");
+
+    #[cfg(not(target_os = "macos"))]
     std::env::current_exe()
         .ok()
         .and_then(|path| path.parent().map(Path::to_path_buf))
@@ -312,7 +337,12 @@ fn warm_screenshot_window(window: &WebviewWindow, capture: &ScreenCapture) -> Re
         }
         return Ok(());
     }
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "macos")]
+    {
+        screenshot_macos::set_window_frame(window, capture.x as f64 - 10_000.0, capture.y as f64, 160.0, 80.0)?;
+        return window.show().map_err(|error| error.to_string());
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     window
         .set_position(tauri::PhysicalPosition::new(capture.x - 10_000, capture.y))
         .and_then(|_| window.set_size(tauri::PhysicalSize::new(160, 80)))
@@ -343,7 +373,16 @@ fn prepare_screenshot_window(window: &WebviewWindow, capture: &ScreenCapture) ->
         }
         return Ok(());
     }
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "macos")]
+    {
+        let (width, height) = capture.logical_size.ok_or_else(|| "截图显示器尺寸无效".to_string())?;
+        screenshot_macos::set_window_frame(window, capture.x as f64, capture.y as f64, width, height)?;
+        return window
+            .show()
+            .and_then(|_| window.set_focus())
+            .map_err(|error| error.to_string());
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     window
         .set_position(tauri::PhysicalPosition::new(capture.x, capture.y))
         .and_then(|_| {
@@ -487,8 +526,10 @@ fn set_native_visibility(window: &WebviewWindow, visible: bool) {
 }
 
 fn emergency_cancel_screenshot_locked(app: &AppHandle, manager: &ScreenshotManager) {
+    log_event(app, "screenshot session closed");
     manager.session_id.fetch_add(1, Ordering::AcqRel);
     manager.active.store(false, Ordering::Release);
+    manager.capturing.store(false, Ordering::Release);
     manager.revealed.store(false, Ordering::Release);
     manager.dialog_open.store(false, Ordering::Release);
     manager.last_heartbeat_ms.store(0, Ordering::Release);
@@ -633,22 +674,32 @@ pub(crate) fn discard_capture(manager: &ScreenshotManager) {
 }
 
 #[tauri::command]
-pub(crate) fn begin_screenshot(app: AppHandle, manager: State<'_, ScreenshotManager>) -> Result<(), String> {
+pub(crate) async fn begin_screenshot(app: AppHandle) -> Result<(), String> {
+    log_event(&app, "screenshot requested");
+    tauri::async_runtime::spawn_blocking(move || begin_screenshot_on_worker(app))
+        .await
+        .map_err(|error| format!("截图任务未能完成：{error}"))?
+}
+
+fn begin_screenshot_on_worker(app: AppHandle) -> Result<(), String> {
+    let manager = app.state::<ScreenshotManager>();
     crate::quick_actions::close_widget_quick_actions(app.clone())?;
+    // Native visibility getters may wait for the main thread. Keep them outside
+    // the lifecycle lock: main-thread cancellation also acquires that lock.
+    let visibility = HiddenWindows {
+        widget: app.get_webview_window("widget").as_ref().is_some_and(window_is_visible),
+        panel: app.get_webview_window("tray-panel").as_ref().is_some_and(window_is_visible),
+    };
     let lifecycle = manager
         .lifecycle_lock
         .lock()
         .map_err(|_| "截图会话状态不可用".to_string())?;
     let pending = manager.capture.lock().ok().is_some_and(|capture| capture.is_some());
-    if manager.active.load(Ordering::Acquire) || pending {
+    if manager.active.load(Ordering::Acquire) || pending || manager.capturing.load(Ordering::Acquire) {
         emergency_cancel_screenshot_locked(&app, &manager);
         return Ok(());
     }
 
-    let visibility = HiddenWindows {
-        widget: app.get_webview_window("widget").as_ref().is_some_and(window_is_visible),
-        panel: app.get_webview_window("tray-panel").as_ref().is_some_and(window_is_visible),
-    };
     if let Ok(mut hidden) = manager.hidden_windows.lock() {
         *hidden = Some(visibility);
     }
@@ -657,6 +708,11 @@ pub(crate) fn begin_screenshot(app: AppHandle, manager: State<'_, ScreenshotMana
     if let Some(window) = app.get_webview_window("tray-panel") {
         let _ = window.hide();
     }
+    let session_id = manager.session_id.fetch_add(1, Ordering::AcqRel) + 1;
+    manager.capturing.store(true, Ordering::Release);
+    // ScreenCaptureKit completion handlers may need the app's main queue.
+    // Never keep the lifecycle lock while waiting for them.
+    drop(lifecycle);
     if visibility.panel {
         std::thread::sleep(Duration::from_millis(120));
     }
@@ -664,14 +720,23 @@ pub(crate) fn begin_screenshot(app: AppHandle, manager: State<'_, ScreenshotMana
     let capture = match capture_current_monitor() {
         Ok(value) => value,
         Err(error) => {
-            emergency_cancel_screenshot_locked(&app, &manager);
-            return Err(error);
+            log_event(&app, &format!("screen capture failed: {error}"));
+            let was_current = cancel_current_session_if(&app, &manager, session_id, |manager| manager.capturing.load(Ordering::Acquire));
+            return if was_current { Err(error) } else { Ok(()) };
         }
     };
-    let session_id = manager.session_id.fetch_add(1, Ordering::AcqRel) + 1;
+    log_event(&app, &format!("screen captured for session {session_id}"));
+    let lifecycle = manager
+        .lifecycle_lock
+        .lock()
+        .map_err(|_| "截图会话状态不可用".to_string())?;
+    if manager.session_id.load(Ordering::Acquire) != session_id || !manager.capturing.load(Ordering::Acquire) {
+        return Ok(());
+    }
     if let Ok(mut slot) = manager.capture.lock() {
         *slot = Some(capture.clone());
     }
+    manager.capturing.store(false, Ordering::Release);
     manager.revealed.store(false, Ordering::Release);
     manager.dialog_open.store(false, Ordering::Release);
     manager.last_heartbeat_ms.store(now_millis(), Ordering::Release);
@@ -682,11 +747,20 @@ pub(crate) fn begin_screenshot(app: AppHandle, manager: State<'_, ScreenshotMana
             return Err("截图窗口不存在".to_string());
         }
     };
-    if let Err(error) = warm_screenshot_window(&window, &capture) {
-        emergency_cancel_screenshot_locked(&app, &manager);
-        return Err(error);
-    }
+    // AppKit frame changes are dispatched to the main thread. Release the session
+    // lock first so a main-thread command cannot wait for it while we wait for AppKit.
     drop(lifecycle);
+    if let Err(error) = warm_screenshot_window(&window, &capture) {
+        log_event(&app, &format!("screenshot window warm-up failed: {error}"));
+        let was_current = cancel_current_session_if(&app, &manager, session_id, |_| true);
+        return if was_current { Err(error) } else { Ok(()) };
+    }
+    log_event(&app, &format!("screenshot window ready for session {session_id}"));
+    if manager.session_id.load(Ordering::Acquire) != session_id
+        || manager.capture.lock().ok().is_none_or(|pending| pending.is_none())
+    {
+        return Ok(());
+    }
     start_screenshot_watchdog(app.clone(), session_id);
     let emitter = app.clone();
     std::thread::spawn(move || {
@@ -734,6 +808,7 @@ pub(crate) fn activate_screenshot(
     }
     manager.last_heartbeat_ms.store(now_millis(), Ordering::Release);
     manager.active.store(true, Ordering::Release);
+    log_event(&app, &format!("screenshot window activated for session {session_id}"));
     drop(lifecycle);
     start_screenshot_reveal_watchdog(app, session_id);
     Ok(session_id)
@@ -765,6 +840,7 @@ pub(crate) fn reveal_screenshot(
     hide_preserved_windows(&app, &manager);
     manager.revealed.store(true, Ordering::Release);
     manager.last_heartbeat_ms.store(now_millis(), Ordering::Release);
+    log_event(&app, &format!("screenshot window revealed for session {session_id}"));
     Ok(())
 }
 
@@ -851,7 +927,7 @@ pub(crate) fn force_cancel_screenshot(app: &AppHandle, manager: &ScreenshotManag
         .lock()
         .ok()
         .is_some_and(|capture| capture.is_some());
-    if manager.active.load(Ordering::Acquire) || pending {
+    if manager.active.load(Ordering::Acquire) || pending || manager.capturing.load(Ordering::Acquire) {
         emergency_cancel_screenshot_locked(app, manager);
     } else if let Some(window) = app.get_webview_window("screenshot") {
         set_native_visibility(&window, false);
@@ -875,7 +951,15 @@ pub(crate) fn open_screenshot_folder(path: String) -> Result<(), String> {
             .map(|_| ())
             .map_err(|error| format!("无法打开截图文件夹：{error}"))
     }
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("/usr/bin/open")
+            .arg(&path)
+            .spawn()
+            .map(|_| ())
+            .map_err(|error| format!("无法打开截图文件夹：{error}"))
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
         let _ = path;
         Err("当前只支持在 Windows 打开截图文件夹".into())
@@ -913,7 +997,7 @@ pub(crate) fn finish_screenshot(
         fs::create_dir_all(parent).map_err(|error| format!("无法创建保存文件夹：{error}"))?;
     }
     fs::write(&target, &png).map_err(|error| format!("无法保存截图：{error}"))?;
-    copy_image_to_clipboard(&image)?;
+    copy_image_to_clipboard(&image, &png)?;
 
     if pin {
         create_pin_window(&app, &manager, ScreenCapture {
@@ -922,6 +1006,19 @@ pub(crate) fn finish_screenshot(
             height: image.height(),
             x: 0,
             y: 0,
+            logical_size: {
+                #[cfg(target_os = "macos")]
+                {
+                    manager.capture.lock().ok().and_then(|capture| capture.as_ref().and_then(|source| {
+                        source.logical_size.map(|(width, height)| (
+                            image.width() as f64 * width / source.width as f64,
+                            image.height() as f64 * height / source.height as f64,
+                        ))
+                    }))
+                }
+                #[cfg(not(target_os = "macos"))]
+                { None }
+            },
             window_targets: Vec::new(),
         })?;
     }
@@ -989,9 +1086,10 @@ fn ensure_png_extension(mut path: PathBuf) -> PathBuf {
 fn create_pin_window(app: &AppHandle, manager: &ScreenshotManager, capture: ScreenCapture) -> Result<(), String> {
     let id = "pin";
     if let Ok(mut pins) = manager.pins.lock() { pins.insert(id.to_string(), capture.clone()); }
-    let scale = (720.0 / capture.width as f64).min(520.0 / capture.height as f64).min(1.0);
-    let width = (capture.width as f64 * scale).max(120.0);
-    let height = (capture.height as f64 * scale).max(80.0);
+    let (source_width, source_height) = capture.logical_size.unwrap_or((capture.width as f64, capture.height as f64));
+    let scale = (720.0 / source_width).min(520.0 / source_height).min(1.0);
+    let width = (source_width * scale).max(120.0);
+    let height = (source_height * scale).max(80.0);
     let window = app.get_webview_window(id).ok_or_else(|| "贴图窗口不存在".to_string())?;
     window
         .set_size(tauri::LogicalSize::new(width, height))
@@ -1098,18 +1196,24 @@ fn capture_current_monitor() -> Result<ScreenCapture, String> {
             height: height as u32,
             x: info.rcMonitor.left,
             y: info.rcMonitor.top,
+            logical_size: None,
             window_targets,
         })
     }
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "macos")]
+fn capture_current_monitor() -> Result<ScreenCapture, String> {
+    screenshot_macos::capture_current_monitor()
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
 fn capture_current_monitor() -> Result<ScreenCapture, String> {
     Err("截图功能当前只支持 Windows".into())
 }
 
 #[cfg(target_os = "windows")]
-fn copy_image_to_clipboard(image: &DynamicImage) -> Result<(), String> {
+fn copy_image_to_clipboard(image: &DynamicImage, _png: &[u8]) -> Result<(), String> {
     use std::{mem::size_of, ptr::copy_nonoverlapping};
     use windows::Win32::{
         Foundation::{GlobalFree, HANDLE},
@@ -1174,8 +1278,13 @@ fn copy_image_to_clipboard(image: &DynamicImage) -> Result<(), String> {
     }
 }
 
-#[cfg(not(target_os = "windows"))]
-fn copy_image_to_clipboard(_image: &DynamicImage) -> Result<(), String> {
+#[cfg(target_os = "macos")]
+fn copy_image_to_clipboard(_image: &DynamicImage, png: &[u8]) -> Result<(), String> {
+    screenshot_macos::copy_png_to_clipboard(png)
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+fn copy_image_to_clipboard(_image: &DynamicImage, _png: &[u8]) -> Result<(), String> {
     Err("复制图片当前只支持 Windows".into())
 }
 
@@ -1268,6 +1377,7 @@ mod tests {
             height: 1080,
             x: -1920,
             y: 0,
+            logical_size: None,
             window_targets: vec![WindowTarget { x: 120, y: 80, width: 800, height: 600 }],
         };
 

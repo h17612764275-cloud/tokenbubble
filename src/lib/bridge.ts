@@ -1,4 +1,4 @@
-﻿import type { ProviderSnapshot, QuotaState, VoiceEvent, WidgetPreferences } from "../types";
+﻿import type { ProviderSnapshot, QuotaState, WidgetPreferences } from "../types";
 
 const defaultPreferences: WidgetPreferences = {
   locked: false,
@@ -12,12 +12,6 @@ const defaultPreferences: WidgetPreferences = {
   pinnedProvider: null,
   autoRotateSeconds: 12,
   language: "zh-CN",
-  voiceEnabled: false,
-  voiceShortcut: "Ctrl+Space",
-  voiceInputDevice: null,
-  voiceSensitivity: 65,
-  voiceEndpointSeconds: 3,
-  voicePunctuationEnabled: false,
   screenshotShortcut: "Ctrl+P",
   screenshotFolder: "",
 };
@@ -175,33 +169,6 @@ export async function togglePanelFromWidget(): Promise<boolean> {
   const { invoke } = await import("@tauri-apps/api/core");
   return invoke<boolean>("toggle_panel_from_widget");
 }
-
-export async function startVoice(): Promise<boolean> {
-  if (!isTauri()) return true;
-  const { invoke } = await import("@tauri-apps/api/core");
-  return invoke<boolean>("start_voice");
-}
-
-export async function stopVoice(): Promise<void> {
-  if (!isTauri()) return;
-  const { invoke } = await import("@tauri-apps/api/core");
-  await invoke("stop_voice");
-}
-
-export async function getVoiceInputDevices(): Promise<string[]> {
-  if (!isTauri()) return [];
-  const { invoke } = await import("@tauri-apps/api/core");
-  return invoke<string[]>("get_voice_input_devices");
-}
-
-export async function registerGlobalShortcut(shortcut: string, handler: () => void): Promise<() => Promise<void>> {
-  if (!isTauri()) return async () => undefined;
-  const { register, unregister } = await import("@tauri-apps/plugin-global-shortcut");
-  await register(shortcut, (event) => { if (event.state === "Pressed") handler(); });
-  return () => unregister(shortcut);
-}
-
-export const registerVoiceShortcut = registerGlobalShortcut;
 
 export async function isGlobalShortcutRegistered(shortcut: string): Promise<boolean> {
   if (!isTauri()) return false;
@@ -381,7 +348,6 @@ export async function listenDesktopEvents(handlers: {
   onPreferences: (value: WidgetPreferences) => void;
   onUpdate: () => void;
   onQuotaState: (value: QuotaState) => void;
-  onVoice?: (value: VoiceEvent) => void;
 }): Promise<() => void> {
   if (!isTauri()) return () => undefined;
   const { listen } = await import("@tauri-apps/api/event");
@@ -395,9 +361,6 @@ export async function listenDesktopEvents(handlers: {
     unlisteners.push(await listen<WidgetPreferences>("preferences-changed", (event) => handlers.onPreferences(event.payload)));
     unlisteners.push(await listen("update-check-requested", handlers.onUpdate));
     unlisteners.push(await listen<QuotaState>("quota-state-changed", (event) => handlers.onQuotaState(event.payload)));
-    if (handlers.onVoice) {
-      unlisteners.push(await listen<VoiceEvent>("voice-event", (event) => handlers.onVoice?.(event.payload)));
-    }
   } catch (error) {
     cleanupAll();
     throw error;

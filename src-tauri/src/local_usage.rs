@@ -74,12 +74,11 @@ pub async fn fetch_usd_cny_rate(client: &reqwest::Client) -> Option<(f64, String
 }
 
 pub fn collect_local_usage() -> Result<LocalUsageSummary, String> {
-    let codex_root = dirs::home_dir()
-        .ok_or_else(|| "home directory is unavailable".to_string())?
-        .join(".codex");
+    let codex_root = crate::codex::codex_home()
+        .ok_or_else(|| "Codex directory is unavailable".to_string())?;
     let cache_path = dirs::data_local_dir()
         .unwrap_or_else(|| codex_root.clone())
-        .join("Quota Float")
+        .join("app.tokenbubble.desktop")
         .join("local-usage-cache.json");
     collect_local_usage_from(&codex_root, &cache_path, Utc::now())
 }

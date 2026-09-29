@@ -4,7 +4,7 @@ import { cloudHeightSurface, createCloudMaskRenderer, type CloudHeightMotion } f
 import { clampPercent, formatDateTime, formatResetDate, formatResetTime, quotaTier } from "../lib/format";
 import { copy, normalizeLanguage } from "../lib/i18n";
 import { FIXED_BUBBLE_WIDGET_ACCENT } from "../lib/skin";
-import type { Language, ProviderSnapshot, VoiceEvent, WidgetPreferences, WidgetStyle } from "../types";
+import type { Language, ProviderSnapshot, WidgetPreferences, WidgetStyle } from "../types";
 import { ProviderMark } from "./ProviderMark";
 import { CloudMistGauge } from "./CloudMistGauge";
 import { LiquidGauge } from "./LiquidGauge";
@@ -169,7 +169,7 @@ export const QuotaCard = memo(function QuotaCard({
   );
 });
 
-export const QuotaOrb = memo(function QuotaOrb({ snapshot, onDrag, onHover, onOpenPanel, onOpenQuickActions, language = "zh-CN", positionLocked = false, widgetSize = 68, accentColor = "#b97892", widgetStyle = "bubble", voiceEvent = { status: "disabled", level: 0 } }: Pick<Props, "snapshot" | "onDrag" | "onHover" | "onOpenPanel"> & { onOpenQuickActions?: () => void | Promise<void>; language?: Language; positionLocked?: boolean; widgetSize?: number; accentColor?: string; widgetStyle?: WidgetStyle; voiceEvent?: VoiceEvent }) {
+export const QuotaOrb = memo(function QuotaOrb({ snapshot, onDrag, onHover, onOpenPanel, onOpenQuickActions, language = "zh-CN", positionLocked = false, widgetSize = 68, accentColor = "#b97892", widgetStyle = "bubble" }: Pick<Props, "snapshot" | "onDrag" | "onHover" | "onOpenPanel"> & { onOpenQuickActions?: () => void | Promise<void>; language?: Language; positionLocked?: boolean; widgetSize?: number; accentColor?: string; widgetStyle?: WidgetStyle }) {
   const orbRef = useRef<HTMLElement | null>(null);
   const surfaceFrame = useRef<CloudHeightMotion>({ time: 0, tilt: 0, wave: 0, energy: 0, reducedMotion: false });
   const renderSurface = useRef<((frame: CloudHeightMotion) => void) | null>(null);
@@ -191,9 +191,6 @@ export const QuotaOrb = memo(function QuotaOrb({ snapshot, onDrag, onHover, onOp
   const available = snapshot.status === "ok" && displayPercent !== null;
   const scale = Math.min(100, Math.max(52, widgetSize)) / 68;
   const widgetAccent = widgetStyle === "bubble" ? FIXED_BUBBLE_WIDGET_ACCENT : accentColor;
-  const voiceStarting = voiceEvent.status === "starting";
-  const voiceActive = voiceEvent.status === "listening" || voiceEvent.status === "recognizing";
-  const centerActive = voiceStarting || voiceActive;
   const responsiveStyle = {
     "--orb-number-size": `${31 * scale}px`,
     "--orb-percent-size": `${12 * scale}px`,
@@ -212,25 +209,32 @@ export const QuotaOrb = memo(function QuotaOrb({ snapshot, onDrag, onHover, onOp
   useLayoutEffect(() => {
     const orb = orbRef.current;
     if (!orb || widgetStyle !== "bubble") return;
+    let renderers: ReturnType<typeof createCloudMaskRenderer>[] = [];
     const updateMasks = () => {
       const bounds = orb.getBoundingClientRect();
       if (bounds.width <= 0 || bounds.height <= 0) return;
       const surface = cloudHeightSurface(available ? displayPercent : 0, bounds.width, bounds.height);
-      const renderers: ReturnType<typeof createCloudMaskRenderer>[] = [];
+      const nextRenderers: ReturnType<typeof createCloudMaskRenderer>[] = [];
       for (const element of orb.querySelectorAll<HTMLElement>(".orb-cloud-photo-mask, .orb-cloud-canvas")) {
         const rect = element.getBoundingClientRect();
         if (rect.width <= 0 || rect.height <= 0) continue;
-        renderers.push(createCloudMaskRenderer(element, surface, {
+        nextRenderers.push(createCloudMaskRenderer(element, surface, {
           x: rect.x - bounds.x, y: rect.y - bounds.y, width: rect.width, height: rect.height,
         }));
       }
+      for (const render of renderers) render.dispose();
+      renderers = nextRenderers;
       renderSurface.current = frame => { for (const render of renderers) render(frame); };
       for (const render of renderers) render(surfaceFrame.current, true);
     };
     updateMasks();
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(updateMasks);
     observer?.observe(orb);
-    return () => { observer?.disconnect(); renderSurface.current = null; };
+    return () => {
+      observer?.disconnect();
+      for (const render of renderers) render.dispose();
+      renderSurface.current = null;
+    };
   }, [widgetStyle, widgetSize, displayPercent, available]);
 
   useEffect(() => {
@@ -257,7 +261,7 @@ export const QuotaOrb = memo(function QuotaOrb({ snapshot, onDrag, onHover, onOp
   return (
     <main
       ref={orbRef}
-      className={`quota-orb quota-orb--${widgetStyle} quota-card--${snapshot.status} quota-card--${tier}${displayingWeeklyAsPrimary ? " quota-orb--weekly" : ""}${idle ? " quota-orb--idle" : ""} quota-orb--voice-${voiceEvent.status}`}
+      className={`quota-orb quota-orb--${widgetStyle} quota-card--${snapshot.status} quota-card--${tier}${displayingWeeklyAsPrimary ? " quota-orb--weekly" : ""}${idle ? " quota-orb--idle" : ""}`}
       style={responsiveStyle}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={(event) => {
@@ -292,27 +296,17 @@ export const QuotaOrb = memo(function QuotaOrb({ snapshot, onDrag, onHover, onOp
         {available && widgetStyle === "bottle" ? <LiquidGauge level={displayPercent!} color={widgetAccent} /> : null}
         {available && widgetStyle === "bubble" ? <CloudMistGauge level={displayPercent!} onMotionFrame={handleSurfaceFrame} /> : null}
         {available ? (
-          <section className={`orb-metric${centerActive ? " is-hidden" : ""}`}>
+          <section className="orb-metric">
             <span>{displayPercent}</span>
             <small>%</small>
           </section>
         ) : (
-          <section className={`orb-unavailable${centerActive ? " is-hidden" : ""}`}>
+          <section className="orb-unavailable">
             <StatusIcon status={snapshot.status} />
           </section>
         )}
         {widgetStyle === "bubble" ? <div className="orb-switch-cloud orb-switch-cloud--idle" aria-hidden="true" /> : null}
       </div>
-      <section className={`orb-voice${voiceActive ? " is-visible" : ""}`} aria-hidden={!voiceActive} aria-label={voiceEvent.status === "listening" ? "正在聆听" : "正在识别"}>
-          <div className="orb-waveform" aria-hidden="true">
-            {[.24, .42, .68, .5, 1, .7, .48, .58, .78, .52, .34, .22, .14].map((height, index) => (
-              <i key={index} style={{ "--index": index, "--voice-bar": `${Math.max(.12, height * (.45 + voiceEvent.level * .75)) * 100}%` } as CSSProperties} />
-            ))}
-          </div>
-      </section>
-      <section className={`orb-starting${voiceStarting ? " is-visible" : ""}`} aria-hidden={!voiceStarting} aria-label="正在启动语音识别">
-        <i /><i /><i />
-      </section>
     </main>
   );
 });

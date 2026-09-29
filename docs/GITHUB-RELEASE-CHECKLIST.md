@@ -1,84 +1,18 @@
-# GitHub 发布与分享清单
+# Mac 无语音版 GitHub 发布清单
 
-## 需要提前安装或准备什么
+## 源码分支
 
-本机 Windows 不需要安装 macOS 构建工具，也不能直接构建 macOS 安装包。macOS 包由 GitHub Actions 的 `macos-latest` runner 构建。
+在同一仓库的独立 `codex/macos-no-voice` 分支提交 Mac 移植源码，保持 `main` 和现有 Windows 发布不变。只暂存经审阅的源码与公开文档；`.agent/`、`截图/`、`outputs/`、本机日志、Codex 会话和凭据不得进入提交。确认 README 链接指向 `docs/MACOS-PORT.md`。
 
-本机需要：
+## 安装包与 Release
 
-- Git
-- Node.js 20+
-- Rust stable
-- npm 依赖已安装
+1. 从现有已安装的 Token Bubble 0.2.2 App 制作 DMG，不重新构建。本次产物为 `Token-Bubble_0.2.2_macos-arm64_20260929.dmg`、`SHA256SUMS.txt`、`INSTALL-macOS-zh-CN.txt`；DMG 已通过 `hdiutil verify`、只读挂载、深度签名及挂载 App 全部 15 个文件的一致性检查。
+2. 在 Mac 源码提交上使用非 `v` 前缀标签 `macos-20260929-no-voice`。现有 `.github/workflows/release.yml` 只在推送 `v*` 标签时触发，且会直接公开 Release；本次不使用该流程。
+3. 在同一 GitHub 仓库为专用标签创建 Mac Release，上传上述三个文件，发布说明使用 [Mac 模板](RELEASE_TEMPLATE.md)，核对附件后再公开。
 
-GitHub 需要：
+## 下载页须说明
 
-- 一个 GitHub 仓库
-- GitHub Actions 已启用
-- 代码已推送到默认分支
-
-macOS Universal 构建需要的 Rust targets 已经在 CI/release workflow 中自动安装：
-
-```bash
-rustup target add aarch64-apple-darwin x86_64-apple-darwin
-```
-
-你不需要在 Windows 本机安装这两个 target。
-
-## 第一次上传到 GitHub
-
-如果本地仓库还没有 remote，先在 GitHub 创建一个空仓库，然后执行：
-
-```bash
-git remote add origin https://github.com/<owner>/<repo>.git
-git branch -M main
-git add .
-git commit -m "Prepare Windows and macOS unsigned release"
-git push -u origin main
-```
-
-如果已经有 remote，只需要：
-
-```bash
-git add .
-git commit -m "Prepare Windows and macOS unsigned release"
-git push origin main
-```
-
-## 生成可分享版本
-
-推送 `v*` tag 会触发 release workflow：
-
-```bash
-git tag v0.1.0
-git push origin v0.1.0
-```
-
-构建完成后，到 GitHub 仓库的 Releases 页面检查 draft release。附件应包含：
-
-- `token-bubble-windows-unsigned.zip`
-- `token-bubble-macos-universal-unsigned.zip`
-
-确认无误后点击 Publish release，然后把 Release 链接发给用户。
-
-## 发给 Mac 用户时的说明
-
-当前 macOS 包是 unsigned 包。用户首次打开可能会被 Gatekeeper 拦截，可以这样打开：
-
-1. 下载 `token-bubble-macos-universal-unsigned.zip`。
-2. 解压后把应用拖到 Applications 或任意测试目录。
-3. 右键点击应用，选择 Open。
-4. 在系统提示里再次选择 Open。
-5. 如果仍被拦截，到 System Settings -> Privacy & Security 里允许打开。
-
-## 以后公开分发还需要什么
-
-如果要面向非技术用户公开分发，建议补：
-
-- Windows 代码签名证书。
-- Apple Developer ID Application 证书。
-- Apple Team ID。
-- Apple app-specific password。
-- GitHub Secrets 中的签名和公证配置。
-
-这些账号、证书和密码不能由代码生成，需要项目所有者申请或购买。
+- 仅支持 Apple Silicon（arm64）与 macOS 14 或更新版本；不宣称 Universal 或 Intel 支持。
+- App 是 ad-hoc 签名、未公证。首次打开可能需要在 Finder 右键选择「打开」，并在「系统设置 → 隐私与安全性」允许。
+- 截图需要当前 App 的录屏授权。更换图标前的签名包已实测选区、标注、保存、复制；更换图标后重新签名的安装包待复测录屏权限。贴图窗口与 CodexScope 网页界面仍待实机确认。
+- DMG 不含本地语音模型，也不应包含截图、会话导出或凭据。

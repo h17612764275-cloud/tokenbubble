@@ -6,15 +6,14 @@ import { QuotaOrb } from "./components/QuotaCard";
 import { PinnedScreenshot } from "./components/PinnedScreenshot";
 import { ScreenshotOverlay } from "./components/ScreenshotOverlay";
 import { TrayPanel } from "./components/TrayPanel";
-import { getPreferences, getQuotaState, listenDesktopEvents, registerVoiceShortcut, requestQuotaRefresh, resizeFloatingWidget, setWidgetExpanded, setWidgetPositionLocked, startDragging, startVoice, stopVoice, toggleFloatingWidget, togglePanelFromWidget, updatePreferences } from "./lib/bridge";
+import { getPreferences, getQuotaState, listenDesktopEvents, requestQuotaRefresh, resizeFloatingWidget, setWidgetExpanded, setWidgetPositionLocked, startDragging, toggleFloatingWidget, togglePanelFromWidget, updatePreferences } from "./lib/bridge";
 import { checkForAppUpdate } from "./lib/appUpdate";
 import { copy, normalizeLanguage } from "./lib/i18n";
 import { recordDailyUsage } from "./lib/dailyUsage";
 import { withPanelAccentColor, withWidgetStyle } from "./lib/skin";
-import { recordVoiceText } from "./lib/voiceHistory";
-import type { ProviderSnapshot, QuotaState, VoiceEvent, WidgetPreferences } from "./types";
+import type { ProviderSnapshot, QuotaState, WidgetPreferences } from "./types";
 
-const DEFAULT_PREFS: WidgetPreferences = { locked: false, positionLocked: false, widgetSize: 68, accentColor: "#b97892", bubblePanelAccentColor: "#faa4ce", widgetStyle: "bubble", alwaysOnTop: true, stayExpanded: false, pinnedProvider: null, autoRotateSeconds: 12, language: "zh-CN", voiceEnabled: false, voiceShortcut: "Ctrl+Space", voiceInputDevice: null, voiceSensitivity: 65, voiceEndpointSeconds: 3, voicePunctuationEnabled: false, screenshotShortcut: "Ctrl+P", screenshotFolder: "" };
+const DEFAULT_PREFS: WidgetPreferences = { locked: false, positionLocked: false, widgetSize: 68, accentColor: "#b97892", bubblePanelAccentColor: "#faa4ce", widgetStyle: "bubble", alwaysOnTop: true, stayExpanded: false, pinnedProvider: null, autoRotateSeconds: 12, language: "zh-CN", screenshotShortcut: "Ctrl+P", screenshotFolder: "" };
 const DESKTOP_LISTENER_RETRY_MS = 1_000;
 
 export default function App() {
@@ -30,8 +29,6 @@ export default function App() {
 function QuotaApp({ isTrayPanel }: { isTrayPanel: boolean }) {
   const [snapshots, setSnapshots] = useState<ProviderSnapshot[]>([]);
   const [preferences, setPreferences] = useState(DEFAULT_PREFS);
-  const [voiceEvent, setVoiceEvent] = useState<VoiceEvent>({ status: "disabled", level: 0 });
-  const [voiceRevision, setVoiceRevision] = useState(0);
   const [activeIndex, setActiveIndex] = useState(0);
   const [hovered, setHovered] = useState(false);
   const [compact, setCompact] = useState(true);
@@ -43,7 +40,6 @@ function QuotaApp({ isTrayPanel }: { isTrayPanel: boolean }) {
   const consumptionTimers = useRef(new Map<string, number>());
   const collapseTimer = useRef<number | null>(null);
   const hoverSequence = useRef(0);
-  const preferencesRef = useRef(preferences);
   const mounted = useRef(false);
   const mountGeneration = useRef(0);
   const language = normalizeLanguage(preferences.language);
@@ -150,15 +146,6 @@ function QuotaApp({ isTrayPanel }: { isTrayPanel: boolean }) {
           onPreferences: (value) => { if (active()) setPreferences({ ...DEFAULT_PREFS, ...value, language: normalizeLanguage(value.language) }); },
           onUpdate: () => { if (active()) checkUpdateRef.current(true); },
           onQuotaState: (state) => { if (active()) applyQuotaState(state); },
-          onVoice: (value) => {
-            if (!active()) return;
-            setVoiceEvent(value);
-            if (value.finalText) {
-              if (!isTrayPanel) recordVoiceText(value.finalText);
-              window.setTimeout(() => { if (active()) setVoiceRevision((revision) => revision + 1); }, 0);
-            }
-            if (value.message) setOperationError(value.message);
-          },
         });
         if (!active()) {
           cleanup();
@@ -183,37 +170,6 @@ function QuotaApp({ isTrayPanel }: { isTrayPanel: boolean }) {
       cleanupListener();
     };
   }, [applyQuotaState, isTrayPanel]);
-
-  useEffect(() => {
-    if (isTrayPanel) return;
-    setVoiceEvent((current) => ({ ...current, status: preferences.voiceEnabled ? "starting" : "disabled", level: 0 }));
-    void (preferences.voiceEnabled ? stopVoice().then(() => startVoice()) : stopVoice())
-      .catch(() => setOperationError(preferences.voiceEnabled ? "语音模式启动失败。" : "语音模式停止失败。"));
-  }, [isTrayPanel, preferences.voiceEnabled, preferences.voiceInputDevice, preferences.voiceSensitivity, preferences.voiceEndpointSeconds, preferences.voicePunctuationEnabled]);
-
-  useEffect(() => {
-    preferencesRef.current = preferences;
-  }, [preferences]);
-
-  useEffect(() => {
-    if (isTrayPanel) return;
-    let cancelled = false;
-    let dispose: (() => Promise<void>) | undefined;
-    void registerVoiceShortcut(preferences.voiceShortcut, () => {
-      const previous = preferencesRef.current;
-      const next = { ...previous, voiceEnabled: !previous.voiceEnabled };
-      preferencesRef.current = next;
-      setPreferences(next);
-      setOperationError(null);
-      void updatePreferences(next).catch(() => {
-        preferencesRef.current = previous;
-        setPreferences(previous);
-        setOperationError("语音快捷键状态保存失败。");
-      });
-    }).then((cleanup) => { if (cancelled) void cleanup(); else dispose = cleanup; })
-      .catch(() => { if (!cancelled) setOperationError(`快捷键 ${preferences.voiceShortcut} 已被占用，请在设置中更换。`); });
-    return () => { cancelled = true; if (dispose) void dispose(); };
-  }, [isTrayPanel, preferences.voiceShortcut]);
 
   useEffect(() => {
     if (isTrayPanel) return;
@@ -243,11 +199,9 @@ function QuotaApp({ isTrayPanel }: { isTrayPanel: boolean }) {
 
   const savePreferences = useCallback((next: WidgetPreferences) => {
     const previous = preferences;
-    preferencesRef.current = next;
     setPreferences(next);
     setOperationError(null);
     void updatePreferences(next).catch((error) => {
-      preferencesRef.current = previous;
       setPreferences(previous);
       setOperationError(
         error instanceof Error && error.message
@@ -302,21 +256,10 @@ function QuotaApp({ isTrayPanel }: { isTrayPanel: boolean }) {
           const next = withWidgetStyle(preferences, widgetStyle);
           return updatePreferences(next).then(() => setPreferences(next));
         }}
-        voiceEvent={voiceEvent}
-        voiceRevision={voiceRevision}
-        onVoicePreferencesChange={(voiceEnabled, voiceShortcut, voiceInputDevice, voiceSensitivity, voiceEndpointSeconds, voicePunctuationEnabled) => savePreferences({
-          ...preferences,
-          voiceEnabled,
-          voiceShortcut,
-          voiceInputDevice,
-          voiceSensitivity,
-          voiceEndpointSeconds,
-          voicePunctuationEnabled,
-        })}
         onScreenshotPreferencesChange={(screenshotShortcut, screenshotFolder) => savePreferences({ ...preferences, screenshotShortcut, screenshotFolder })}
       />
     );
   }
 
-  return <QuotaOrb onOpenQuickActions={() => showWidgetQuickActions()} snapshot={current} language={language} positionLocked={preferences.positionLocked} widgetSize={preferences.widgetSize} accentColor={preferences.accentColor} widgetStyle={preferences.widgetStyle} voiceEvent={voiceEvent} onDrag={() => startDragging()} onHover={(value) => { setHovered(value); if (value && (current.status === "unavailable" || current.status === "stale")) void refresh(); }} onOpenPanel={() => togglePanelFromWidget()} />;
+  return <QuotaOrb onOpenQuickActions={() => showWidgetQuickActions()} snapshot={current} language={language} positionLocked={preferences.positionLocked} widgetSize={preferences.widgetSize} accentColor={preferences.accentColor} widgetStyle={preferences.widgetStyle} onDrag={() => startDragging()} onHover={(value) => { setHovered(value); if (value && (current.status === "unavailable" || current.status === "stale")) void refresh(); }} onOpenPanel={() => togglePanelFromWidget()} />;
 }

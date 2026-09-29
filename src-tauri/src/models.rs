@@ -133,18 +133,6 @@ pub struct WidgetPreferences {
     pub auto_rotate_seconds: u64,
     #[serde(default = "default_language")]
     pub language: String,
-    #[serde(default)]
-    pub voice_enabled: bool,
-    #[serde(default = "default_voice_shortcut")]
-    pub voice_shortcut: String,
-    #[serde(default)]
-    pub voice_input_device: Option<String>,
-    #[serde(default = "default_voice_sensitivity")]
-    pub voice_sensitivity: f32,
-    #[serde(default = "default_voice_endpoint_seconds")]
-    pub voice_endpoint_seconds: f32,
-    #[serde(default)]
-    pub voice_punctuation_enabled: bool,
     #[serde(default = "default_screenshot_shortcut")]
     pub screenshot_shortcut: String,
     #[serde(default)]
@@ -169,15 +157,6 @@ fn default_widget_style() -> String {
 fn default_language() -> String {
     "zh-CN".into()
 }
-fn default_voice_shortcut() -> String {
-    "Ctrl+Space".into()
-}
-fn default_voice_sensitivity() -> f32 {
-    65.0
-}
-fn default_voice_endpoint_seconds() -> f32 {
-    3.0
-}
 fn default_screenshot_shortcut() -> String {
     "Ctrl+P".into()
 }
@@ -195,12 +174,6 @@ impl Default for WidgetPreferences {
             pinned_provider: None,
             auto_rotate_seconds: 12,
             language: default_language(),
-            voice_enabled: false,
-            voice_shortcut: default_voice_shortcut(),
-            voice_input_device: None,
-            voice_sensitivity: default_voice_sensitivity(),
-            voice_endpoint_seconds: default_voice_endpoint_seconds(),
-            voice_punctuation_enabled: false,
             screenshot_shortcut: default_screenshot_shortcut(),
             screenshot_folder: String::new(),
         }
@@ -234,23 +207,6 @@ impl WidgetPreferences {
         if self.language != "en" && self.language != "zh-CN" {
             self.language = default_language();
         }
-        if self.voice_shortcut.trim().is_empty() || self.voice_shortcut.len() > 64 {
-            self.voice_shortcut = default_voice_shortcut();
-        }
-        self.voice_input_device = self.voice_input_device.and_then(|value| {
-            let value = value.trim();
-            (!value.is_empty()).then(|| value.to_string())
-        });
-        self.voice_sensitivity = if self.voice_sensitivity.is_finite() {
-            self.voice_sensitivity.clamp(0.0, 100.0)
-        } else {
-            default_voice_sensitivity()
-        };
-        self.voice_endpoint_seconds = if self.voice_endpoint_seconds.is_finite() {
-            self.voice_endpoint_seconds.clamp(1.0, 8.0)
-        } else {
-            default_voice_endpoint_seconds()
-        };
         if self.screenshot_shortcut.trim().is_empty() || self.screenshot_shortcut.len() > 64 {
             self.screenshot_shortcut = default_screenshot_shortcut();
         }
@@ -284,12 +240,6 @@ mod preference_tests {
 
         assert_eq!(value.accent_color, "#c07090");
         assert_eq!(value.bubble_panel_accent_color, "#faa4ce");
-        assert!(!value.voice_enabled);
-        assert_eq!(value.voice_shortcut, "Ctrl+Space");
-        assert_eq!(value.voice_input_device, None);
-        assert_eq!(value.voice_sensitivity, 65.0);
-        assert_eq!(value.voice_endpoint_seconds, 3.0);
-        assert!(!value.voice_punctuation_enabled);
         assert_eq!(value.screenshot_shortcut, "Ctrl+P");
         assert_eq!(value.screenshot_folder, "");
     }
@@ -303,5 +253,17 @@ mod preference_tests {
 
         assert_eq!(value.accent_color, "#123456");
         assert_eq!(value.bubble_panel_accent_color, "#faa4ce");
+    }
+
+    #[test]
+    fn old_voice_settings_do_not_survive_no_voice_preferences() {
+        let mut legacy = serde_json::to_value(WidgetPreferences::default()).unwrap();
+        legacy["voiceEnabled"] = serde_json::json!(true);
+        legacy["voiceShortcut"] = serde_json::json!("Ctrl+Space");
+        legacy["voiceInputDevice"] = serde_json::json!("old microphone");
+        let preferences: WidgetPreferences = serde_json::from_value(legacy).unwrap();
+        let saved = serde_json::to_value(preferences.normalized()).unwrap();
+        assert!(saved.as_object().unwrap().keys().all(|key| !key.starts_with("voice")));
+        assert_eq!(saved["screenshotShortcut"], "Ctrl+P");
     }
 }

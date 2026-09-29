@@ -27,11 +27,14 @@ struct Auth {
     account_id: Option<String>,
 }
 
-fn auth_path() -> Option<PathBuf> {
+pub(crate) fn codex_home() -> Option<PathBuf> {
     std::env::var_os("CODEX_HOME")
         .map(PathBuf::from)
         .or_else(|| dirs::home_dir().map(|home| home.join(".codex")))
-        .map(|home| home.join("auth.json"))
+}
+
+fn auth_path() -> Option<PathBuf> {
+    codex_home().map(|home| home.join("auth.json"))
 }
 
 fn pick_string<'a>(value: &'a Value, keys: &[&str]) -> Option<&'a str> {
@@ -383,7 +386,7 @@ fn safe_http_failure(status: reqwest::StatusCode) -> (&'static str, &'static str
 }
 
 fn record_quota_failure(message: &str) {
-    let Some(directory) = dirs::config_dir().map(|path| path.join("app.quotafloat.desktop")) else {
+    let Some(directory) = dirs::config_dir().map(|path| path.join("app.tokenbubble.desktop")) else {
         return;
     };
     if fs::create_dir_all(&directory).is_err() {

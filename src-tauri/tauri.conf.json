@@ -2,7 +2,7 @@
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Token Bubble 余量浮窗",
   "version": "0.2.2",
-  "identifier": "app.quotafloat.desktop",
+  "identifier": "app.tokenbubble.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -53,6 +53,7 @@
       {
         "label": "screenshot",
         "title": "Token Bubble 截图",
+        "backgroundThrottling": "disabled",
         "url": "index.html?view=screenshot",
         "width": 1,
         "height": 1,
@@ -111,6 +112,10 @@
     "targets": "all",
     "category": "Utility",
     "publisher": "Token Bubble contributors",
+    "macOS": {
+      "minimumSystemVersion": "14.0",
+      "signingIdentity": "-"
+    },
     "shortDescription": "Codex quota at a glance",
     "longDescription": "A lightweight floating desktop card for Codex usage limits.",
     "copyright": "Copyright Token Bubble contributors",
@@ -122,10 +127,7 @@
       "icons/icon.ico"
     ],
     "resources": {
-      "resources/codexscope/": "codexscope/",
-      "resources/asr/": "asr/",
-      "resources/punctuation/": "punctuation/",
-      "resources/VOICE_MODEL_NOTICES.md": "VOICE_MODEL_NOTICES.md"
+      "resources/codexscope/": "codexscope/"
     }
   }
 }

@@ -1,5 +1,7 @@
 # Token Bubble 余量浮窗
 
+> Mac 无语音版本的支持范围和验证结果见 [Mac 移植说明](docs/MACOS-PORT.md)。下方历史发布记录保留用于对照上游；不要执行其中的语音模型下载步骤。
+
 **简体中文** · [English](README.en.md)
 
 Token Bubble 是一个本地优先的 Codex 额度与 Token 用量桌面浮窗。它将额度、Token 分布、估算花费和近期用量放在一个可调整、可固定的轻量面板中。
@@ -190,13 +192,12 @@ Token Bubble 是独立的衍生项目，并非 Quota Float 或 CodexScope 的官
 
 ```bash
 npm install
-npm run models:fetch
 npm run test
 npm run build
 npm run tauri dev
 ```
 
-在 Windows 上构建与此备份对应的 x64 安装包（先运行上面的 `npm run models:fetch`）：
+在 Windows 上构建此无语音分支的 x64 安装包：
 
 ```bash
 npm run tauri -- build --bundles nsis

@@ -25,12 +25,6 @@ const preferences: WidgetPreferences = {
   pinnedProvider: null,
   autoRotateSeconds: 12,
   language: "zh-CN",
-  voiceEnabled: false,
-  voiceShortcut: "Ctrl+Space",
-  voiceInputDevice: null,
-  voiceSensitivity: 65,
-  voiceEndpointSeconds: 3,
-  voicePunctuationEnabled: false,
   screenshotShortcut: "Ctrl+P",
   screenshotFolder: "",
 };

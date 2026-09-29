@@ -2,15 +2,6 @@ export type ProviderId = "codex" | "claude";
 export type SnapshotStatus = "ok" | "stale" | "loading" | "unavailable" | "signed_out";
 export type Language = "zh-CN" | "en";
 export type WidgetStyle = "bubble" | "bottle";
-export type VoiceStatus = "disabled" | "starting" | "standby" | "listening" | "recognizing" | "error";
-
-export interface VoiceEvent {
-  status: VoiceStatus;
-  level: number;
-  partial?: string;
-  finalText?: string;
-  message?: string;
-}
 
 export interface UsageWindow {
   remainingPercent: number;
@@ -106,12 +97,6 @@ export interface WidgetPreferences {
   pinnedProvider: ProviderId | null;
   autoRotateSeconds: number;
   language: Language;
-  voiceEnabled: boolean;
-  voiceShortcut: string;
-  voiceInputDevice: string | null;
-  voiceSensitivity: number;
-  voiceEndpointSeconds: number;
-  voicePunctuationEnabled: boolean;
   screenshotShortcut: string;
   screenshotFolder: string;
 }

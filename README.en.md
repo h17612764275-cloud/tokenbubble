@@ -1,5 +1,7 @@
 # Token Bubble
 
+> See the [macOS port notes](docs/MACOS-PORT.md) for the scope and validation of the Mac build without voice recognition, microphone controls, or speech models. Historical release notes below describe upstream versions; no voice model download is needed for this branch.
+
 [简体中文](README.md) · **English**
 
 Token Bubble is a local-first desktop widget for Codex quota and token usage. It brings quota status, token distribution, estimated cost, and recent usage into a lightweight panel that can be resized and pinned.
@@ -151,7 +153,6 @@ Requires Node.js 20+, Rust stable, and the Tauri 2 system dependencies for your 
 
 ```bash
 npm install
-npm run models:fetch
 npm run test
 npm run build
 npm run tauri dev

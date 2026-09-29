@@ -1,7 +1,11 @@
 /node_modules
+/.tooling
+/scripts/codexscope/__pycache__/
 /dist
 /outputs
 /release
+/.agent/
+/截图/
 /src-tauri/target
 /.codex-target*/
 /.tauri-dev-target/

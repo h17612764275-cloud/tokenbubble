@@ -1,0 +1,13 @@
+CodexScope macOS 用户先看
+
+1. 双击 Open CodexScope.command。
+2. 如果 macOS 拦截，打开 系统设置 > 隐私与安全性，点击 仍要打开。
+3. CodexScope Files 文件夹不用点，程序会自动使用里面的文件。
+4. 这个包已经内置编译好的程序，不需要安装 Go。
+
+如果你下载的是 GitHub 自动生成的 Source code (zip)，那是给开发者看的源码包，不是普通用户推荐下载。
+
+1. Double-click Open CodexScope.command.
+2. If macOS blocks it, open System Settings > Privacy & Security, then click Open Anyway.
+3. You do not need to open CodexScope Files manually.
+4. This package already includes the compiled generator. You do not need Go.

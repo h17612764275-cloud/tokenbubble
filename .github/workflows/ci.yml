@@ -28,9 +28,9 @@ jobs:
             build-command: npm run tauri -- build --bundles nsis
             artifact-path: src-tauri/target/release/bundle/**
           - os: macos-latest
-            artifact-name: token-bubble-macos-universal-unsigned
-            build-command: npm run tauri -- build --target universal-apple-darwin
-            artifact-path: src-tauri/target/universal-apple-darwin/release/bundle/**
+            artifact-name: token-bubble-macos-arm64-unsigned
+            build-command: npm run tauri -- build --target aarch64-apple-darwin --bundles app
+            artifact-path: src-tauri/target/aarch64-apple-darwin/release/bundle/**
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -39,16 +39,13 @@ jobs:
           node-version: 22
           cache: npm
       - uses: dtolnay/rust-toolchain@stable
-      - name: Install macOS universal targets
+      - name: Install macOS Apple Silicon target
         if: runner.os == 'macOS'
-        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+        run: rustup target add aarch64-apple-darwin
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
       - run: npm ci
-      - name: Fetch verified local voice models
-        shell: pwsh
-        run: ./scripts/fetch-voice-models.ps1
       - run: npm run build
       - run: cargo test --manifest-path src-tauri/Cargo.toml
       - run: ${{ matrix.build-command }}

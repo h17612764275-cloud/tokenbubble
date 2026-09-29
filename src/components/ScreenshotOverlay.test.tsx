@@ -28,9 +28,11 @@ const events = vi.hoisted(() => ({
     return () => events.listeners.delete(name);
   }),
 }));
+const path = vi.hoisted(() => ({ join: vi.fn(async (_folder: string, _filename: string): Promise<string> => "") }));
 
 vi.mock("../lib/bridge", () => bridge);
 vi.mock("@tauri-apps/api/event", () => ({ listen: events.listen }));
+vi.mock("@tauri-apps/api/path", () => ({ join: path.join }));
 
 import { ScreenshotOverlay } from "./ScreenshotOverlay";
 
@@ -88,6 +90,7 @@ beforeEach(() => {
     sessionId: 1,
   });
   bridge.getPreferences.mockResolvedValue({ screenshotFolder: "C:\\Screenshots" });
+  path.join.mockImplementation(async (folder, filename) => `${folder}${folder.startsWith("/") ? "/" : "\\"}${filename}`);
 
   Object.defineProperties(HTMLElement.prototype, {
     setPointerCapture: { configurable: true, value: vi.fn() },
@@ -194,6 +197,41 @@ describe("ScreenshotOverlay", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
+  it("ignores ready events without a valid session number", async () => {
+    const { container } = render(<ScreenshotOverlay />);
+    await waitFor(() => expect(container.querySelector("img")?.getAttribute("src")).toContain("cGl4ZWxz"));
+
+    await act(async () => {
+      events.listeners.get("screenshot-capture-ready")?.({ payload: undefined as never });
+      events.listeners.get("screenshot-capture-ready")?.({ payload: Number.NaN });
+      events.listeners.get("screenshot-capture-ready")?.({ payload: 1.5 });
+      await Promise.resolve();
+    });
+
+    expect(bridge.getScreenshotCapture).toHaveBeenCalledOnce();
+    expect(container.querySelector("img")?.getAttribute("src")).toContain("cGl4ZWxz");
+  });
+
+  it("does not let the initial read replace a ready event received during listener registration", async () => {
+    bridge.getScreenshotCapture.mockResolvedValue({
+      dataUrl: "data:image/png;base64,bmV3ZXI=",
+      width: 1024,
+      height: 768,
+      sessionId: 2,
+    });
+    events.listen.mockImplementationOnce(async (name, listener) => {
+      events.listeners.set(name, listener);
+      listener({ payload: 2 });
+      return () => events.listeners.delete(name);
+    });
+
+    const { container } = render(<ScreenshotOverlay />);
+    await waitFor(() => expect(container.querySelector("img")?.getAttribute("src")).toContain("bmV3ZXI="));
+
+    expect(bridge.getScreenshotCapture).toHaveBeenCalledOnce();
+    expect(bridge.getScreenshotCapture).toHaveBeenCalledWith(2);
+  });
+
   it("does not surface an activation error from an older session", async () => {
     let rejectOlderActivation!: (reason?: unknown) => void;
     bridge.activateScreenshot
@@ -262,6 +300,108 @@ describe("ScreenshotOverlay", () => {
     });
 
     await waitFor(() => expect(bridge.revealScreenshot).toHaveBeenCalledWith(17));
+  });
+
+  it("activates and reveals when animation frames are paused", async () => {
+    vi.stubGlobal("requestAnimationFrame", vi.fn(() => 1));
+    const { container } = render(<ScreenshotOverlay />);
+    const image = await waitFor(() => {
+      const value = container.querySelector<HTMLImageElement>(".screenshot-capture");
+      expect(value).not.toBeNull();
+      return value!;
+    });
+
+    fireEvent.load(image);
+
+    await waitFor(() => expect(bridge.activateScreenshot).toHaveBeenCalledWith(1));
+    await waitFor(() => expect(bridge.revealScreenshot).toHaveBeenCalledWith(1));
+  });
+
+  it("does not reveal a canceled capture after the fallback timeout", async () => {
+    vi.stubGlobal("requestAnimationFrame", vi.fn(() => 1));
+    const { container } = render(<ScreenshotOverlay />);
+    const image = await waitFor(() => {
+      const value = container.querySelector<HTMLImageElement>(".screenshot-capture");
+      expect(value).not.toBeNull();
+      return value!;
+    });
+    fireEvent.load(image);
+    await waitFor(() => expect(bridge.activateScreenshot).toHaveBeenCalledWith(1));
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() => expect(bridge.cancelScreenshot).toHaveBeenCalledWith(1));
+    await new Promise((resolve) => setTimeout(resolve, 160));
+
+    expect(bridge.revealScreenshot).not.toHaveBeenCalled();
+  });
+
+  it("does not reveal an old capture after a newer session arrives", async () => {
+    vi.stubGlobal("requestAnimationFrame", vi.fn(() => 1));
+    const { container } = render(<ScreenshotOverlay />);
+    const oldImage = await waitFor(() => {
+      const value = container.querySelector<HTMLImageElement>(".screenshot-capture");
+      expect(value).not.toBeNull();
+      return value!;
+    });
+    fireEvent.load(oldImage);
+    await waitFor(() => expect(bridge.activateScreenshot).toHaveBeenCalledWith(1));
+
+    bridge.getScreenshotCapture.mockResolvedValueOnce({
+      dataUrl: "data:image/png;base64,bmV3ZXI=",
+      width: 1024,
+      height: 768,
+      sessionId: 2,
+    });
+    await act(async () => {
+      events.listeners.get("screenshot-capture-ready")?.({ payload: 2 });
+      await Promise.resolve();
+    });
+    const newImage = await waitFor(() => {
+      const value = container.querySelector<HTMLImageElement>(".screenshot-capture");
+      expect(value?.getAttribute("src")).toContain("bmV3ZXI=");
+      return value!;
+    });
+    fireEvent.load(newImage);
+    await waitFor(() => expect(bridge.revealScreenshot).toHaveBeenCalledWith(2));
+
+    expect(bridge.revealScreenshot).not.toHaveBeenCalledWith(1);
+  });
+
+  it("does not reveal after the overlay unmounts", async () => {
+    vi.stubGlobal("requestAnimationFrame", vi.fn(() => 1));
+    const { container, unmount } = render(<ScreenshotOverlay />);
+    const image = await waitFor(() => {
+      const value = container.querySelector<HTMLImageElement>(".screenshot-capture");
+      expect(value).not.toBeNull();
+      return value!;
+    });
+    fireEvent.load(image);
+    await waitFor(() => expect(bridge.activateScreenshot).toHaveBeenCalledWith(1));
+
+    unmount();
+    await new Promise((resolve) => setTimeout(resolve, 160));
+
+    expect(bridge.revealScreenshot).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["/Users/test/Pictures", "/Users/test/Pictures/"],
+    ["C:\\Screenshots", "C:\\Screenshots\\"],
+  ])("uses native path joining for the save dialog in %s", async (folder, pathPrefix) => {
+    bridge.getPreferences.mockResolvedValue({ screenshotFolder: folder });
+    Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
+      configurable: true,
+      value: vi.fn(() => ({ clearRect: vi.fn(), drawImage: vi.fn() })),
+    });
+    vi.spyOn(HTMLCanvasElement.prototype, "toDataURL").mockReturnValue("data:image/png;base64,cGl4ZWxz");
+    const { container } = render(<ScreenshotOverlay />);
+
+    await waitFor(() => expect(container.querySelector("img")).not.toBeNull());
+    selectRegion(screen.getByRole("main"), 19);
+    fireEvent.click(await screen.findByRole("button", { name: "另存为" }));
+
+    await waitFor(() => expect(path.join).toHaveBeenCalledWith(folder, expect.stringMatching(/^Token-Bubble_.*\.png$/)));
+    await waitFor(() => expect(bridge.chooseScreenshotFile).toHaveBeenCalledWith(expect.stringMatching(new RegExp(`^${pathPrefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}Token-Bubble_.*\\.png$`))));
   });
 
   it("does not let an older save dialog callback alter the newer screenshot session", async () => {
