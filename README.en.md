@@ -1,7 +1,5 @@
 # Token Bubble
 
-> See the [macOS port notes](docs/MACOS-PORT.md) for the scope and validation of the Mac build without voice recognition, microphone controls, or speech models. Historical release notes below describe upstream versions; no voice model download is needed for this branch.
-
 [简体中文](README.md) · **English**
 
 Token Bubble is a local-first desktop widget for Codex quota and token usage. It brings quota status, token distribution, estimated cost, and recent usage into a lightweight panel that can be resized and pinned.
@@ -10,9 +8,28 @@ Token Bubble is derived from **Quota Float** and integrates **CodexScope** for l
 
 ## Download
 
-- [Download the latest installer](https://github.com/h17612764275-cloud/token-bubble/releases/latest)
-- Current version: `v0.2.7`
-- Windows users should download the `.exe` installer from the Release.
+| Platform | Build | Installer |
+| --- | --- | --- |
+| macOS · Apple Silicon (M series) | 0.2.2 · no-voice test build · 2026-09-29 | [Download DMG (about 12 MB)](https://github.com/h17612764275-cloud/tokenbubble/releases/download/macos-20260929-no-voice/Token-Bubble_0.2.2_macos-arm64_20260929.dmg) |
+| Windows · x64 | 0.2.2 · center-flow build · 2026-09-12 | [Download EXE](https://github.com/h17612764275-cloud/tokenbubble/releases/download/windows-backup-20260912-center-flow/Token-Bubble_0.2.2_center-flow_20260912_x64-setup.exe) |
+
+[Mac release and checksums](https://github.com/h17612764275-cloud/tokenbubble/releases/tag/macos-20260929-no-voice) · [Windows backup notes](https://github.com/h17612764275-cloud/tokenbubble/releases/tag/windows-backup-20260912-center-flow) · [All releases](https://github.com/h17612764275-cloud/tokenbubble/releases)
+
+Both installers report version `0.2.2`; distinguish them by platform, filename, and release date. Windows source stays on `main`; Mac source is maintained on the separate [codex/macos-no-voice branch](https://github.com/h17612764275-cloud/tokenbubble/tree/codex/macos-no-voice). The approved Windows build has a [fixed source snapshot](https://github.com/h17612764275-cloud/tokenbubble/tree/windows-source-20260912-center-flow).
+
+## macOS no-voice test build (2026-09-29)
+
+- **Requirements:** Apple Silicon (M series) and macOS 14 or later. No Intel or Universal installer is provided.
+- **Scope:** Retains the quota widget, token usage, both skins, capture and annotation, saving, clipboard copy, pinned images, and CodexScope. Menu bar, Dock, and Finder icons are unified. Voice recognition and its dependencies are removed; **no speech model download is needed**.
+- **Installation:** Open the DMG and drag the app into Applications. This build is ad-hoc signed, without Apple Developer ID signing or notarization. If macOS blocks it, verify the download source and follow System Settings → Privacy & Security → Open Anyway.
+- **Capture permission:** Allow the current app under Screen & System Audio Recording, then quit and reopen it. The default shortcut is `Ctrl+P`; screenshot settings also provide a start button. Replacing an ad-hoc signed build may require removing the old recording entry and adding the current app again.
+- **Validation limits:** DMG integrity, mounting, and app signatures were checked; GitHub assets were downloaded again and verified. Recording permission for the current icon build, pinned-window interaction, and the CodexScope web UI still need device validation. The update-check entry does not implement automatic updates.
+
+[Installation guide (Chinese)](https://github.com/h17612764275-cloud/tokenbubble/releases/download/macos-20260929-no-voice/INSTALL-macOS-zh-CN.txt) · [SHA-256 checksums](https://github.com/h17612764275-cloud/tokenbubble/releases/download/macos-20260929-no-voice/SHA256SUMS.txt) · [Fixed source snapshot](https://github.com/h17612764275-cloud/tokenbubble/tree/macos-20260929-no-voice) · [macOS port and validation notes](https://github.com/h17612764275-cloud/tokenbubble/blob/macos-20260929-no-voice/docs/MACOS-PORT.md)
+
+## Historical Windows release notes
+
+The entries below describe earlier Windows releases; use the platform-specific downloads above for the current backups.
 
 ## v0.2.7 cloud clarity update (2026-09-03)
 
@@ -47,7 +64,7 @@ Token Bubble is derived from **Quota Float** and integrates **CodexScope** for l
 
 > These are the main `v0.2.2` updates; installer and source versions stay aligned.
 
-- **Windows local screenshots and pinned captures:** Configure capture from the panel's camera button, then start with a global shortcut (`Ctrl+P` by default). Select, move, and resize a region, then annotate it with rectangles, ellipses, arrows, freehand strokes, mosaic, or text. Capture, clipboard copy, and pinned images are currently Windows-only.
+- **Windows local screenshots and pinned captures:** Configure capture from the panel's camera button, then start with a global shortcut (`Ctrl+P` by default). Select, move, and resize a region, then annotate it with rectangles, ellipses, arrows, freehand strokes, mosaic, or text. These features were Windows-only in that historical release; see the Mac test-build notes above for the port.
 - **Save, clipboard, and pin:** Confirming saves a PNG and copies it to the clipboard. A selection can also be saved elsewhere or opened as a draggable, resizable, always-on-top image.
 - **Screenshot preferences:** Change the global shortcut, choose the default output folder, and open that folder directly from the panel.
 - **Automatic quota recovery:** The last valid quota stays visible through transient failures. Token Bubble retries after 30 seconds, supports immediate retry from an unavailable widget, and shares successful recovery between the tray panel and widget.
@@ -55,7 +72,7 @@ Token Bubble is derived from **Quota Float** and integrates **CodexScope** for l
 
 ## Interface preview
 
-The latest main-panel screenshot is generated from the current `main` interface with built-in demo data. It contains no real account or personal usage data.
+These previews show earlier interfaces with built-in demo data, without real account or personal usage data. Refer to each platform build for its current appearance.
 
 ### Current main panel
 
@@ -85,13 +102,13 @@ Switch the usage range between today, the last 7 days, and the last 30 days. The
 
 ### Floating widget
 
-The floating widget matches the selected Bubble or Glass skin. It can be resized, locked in place, and kept on top. Click it to open the full panel.
+The floating widget matches the selected Bubble or Glass skin. It can be resized, locked in place, and kept on top. Double-click it to open the full panel; drag to move it.
 
 | Bubble widget | Glass widget |
 | --- | --- |
 | ![Token Bubble Bubble floating widget](docs/images/token-bubble-orb-bubble.png?v=0.2.0) | ![Token Bubble Glass floating widget](docs/images/token-bubble-orb-glass.png?v=0.2.0) |
 
-### Local real-time Chinese-English voice input
+### Windows: local real-time Chinese-English voice input
 
 Press a configurable shortcut once to start continuous recognition and again to stop. Text appears while you speak, with support for Chinese, English, and mixed speech plus automatic on-device punctuation. The shortcut, microphone, and activation sensitivity are configurable.
 
@@ -108,9 +125,9 @@ Press a configurable shortcut once to start continuous recognition and again to 
 - Resizes the floating widget, locks its position, and keeps it on top.
 - Stores a membership renewal date and shows the remaining days.
 - Provides tray actions for refresh and panel/widget visibility.
-- Provides fully local real-time Chinese-English voice input, automatic punctuation, and voice activity detection.
-- Tracks today's dictated characters and shows voice usage in the flippable 90-day heatmap.
-- Provides local region capture, annotation, saving, clipboard copy, and always-on-top pinned images on Windows.
+- The Windows build provides local Chinese-English voice input, automatic punctuation, and voice activity detection. The Mac build has no voice features.
+- The Windows build tracks today's dictated characters and shows voice usage in the 90-day heatmap.
+- Provides local capture, annotation, saving, clipboard copy, and pinned images; see above for Mac permissions and validation limits.
 - Recovers quota automatically after transient network failures and synchronizes successful results across windows.
 
 ## Usage
@@ -120,18 +137,18 @@ Press a configurable shortcut once to start continuous recognition and again to 
 3. Select today, 7 days, or 30 days from the usage range.
 4. Use the controls to switch Bubble/Glass skins, open the color picker, resize the widget, or lock it in place.
 5. Select the renewal date at the top of the panel to set your membership renewal.
-6. Configure the voice shortcut, input device, and sensitivity; press the shortcut once to start and again to stop.
-7. On Windows, open screenshot settings from the camera button, configure the shortcut and folder, then select a region to save, copy, or pin.
+6. Windows only: configure the voice shortcut, input device, and sensitivity; press the shortcut once to start and again to stop.
+7. Open screenshot settings from the camera button to configure the shortcut and folder. On Mac, grant screen-recording permission before starting a capture.
 
 ## Data and privacy
 
-Token Bubble reads the existing local Codex Desktop login state and queries quota in read-only mode. Token history, voice-character totals, interface and screenshot preferences, and the membership renewal date stay on the device. Speech recognition, punctuation, and screenshot processing run on-device.
+Token Bubble reads the existing local Codex Desktop login state and queries quota in read-only mode. Token history, interface and screenshot preferences, and the membership renewal date stay on-device. Screenshots are processed locally. The Windows build also processes speech recognition, punctuation, and voice-character totals locally; the Mac build has no voice features.
 
 - It does not upload prompts, chats, or local usage history.
 - It includes no telemetry, analytics, or crash reporting.
 - It does not redeem reset credits or change account settings.
 - Local token totals support history and verification views; they do not replace service-provided quota values.
-- Microphone audio is neither uploaded nor saved; only final character counts are stored locally for usage statistics.
+- Windows microphone audio is neither uploaded nor saved; only final character counts are stored locally. The Mac build does not use the microphone.
 - Screen pixels are read only when the user starts a capture. Screenshots are not uploaded; they are saved locally and copied to the system clipboard.
 
 See [PRIVACY.md](PRIVACY.md) and [SECURITY.md](SECURITY.md) for the complete boundary.
@@ -142,12 +159,25 @@ Token Bubble is an independent derivative project and is not an official release
 
 - **Quota Float** provided the base desktop-widget architecture and Codex quota display.
 - **CodexScope** provided components used for local token-usage verification.
-- **sherpa-onnx / Paraformer** provides the local streaming Chinese-English recognition and punctuation runtime and models.
-- **Token Bubble** adds the new panel, skins, time ranges, token distribution, estimated cost, widget controls, membership renewal setting, and local voice input.
+- **sherpa-onnx / Paraformer** provides recognition and punctuation runtimes and models for the Windows build; these dependencies are absent from the Mac build.
+- **Token Bubble** adds the new panel, skins, time ranges, token distribution, estimated cost, widget controls, membership renewal setting, and Windows voice input.
 
 See [LICENSE](LICENSE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for license and attribution details.
 
-## Development
+## Build the macOS version
+
+Requires an Apple Silicon Mac, Xcode command line tools, Node.js, and Rust stable. Use the dedicated Mac branch; do not run speech-model download commands:
+
+```bash
+git clone --branch codex/macos-no-voice https://github.com/h17612764275-cloud/tokenbubble.git tokenbubble-macos
+cd tokenbubble-macos
+npm ci --ignore-scripts
+./scripts/build-macos.sh
+```
+
+The app is written to `src-tauri/target/release/bundle/macos/`. Rebuilding may change its signature and require fresh recording permission. The published DMG corresponds to the fixed tag `macos-20260929-no-voice`.
+
+## Development on this Mac branch
 
 Requires Node.js 20+, Rust stable, and the Tauri 2 system dependencies for your platform.
 
@@ -166,4 +196,4 @@ npm run tauri build
 
 ## Feedback
 
-Use [GitHub Issues](https://github.com/h17612764275-cloud/token-bubble/issues) for bugs and feature requests. Remove tokens, account information, email addresses, and local paths before sharing screenshots or logs.
+Use [GitHub Issues](https://github.com/h17612764275-cloud/tokenbubble/issues) for bugs and feature requests. Remove tokens, account information, email addresses, and local paths before sharing screenshots or logs.
