@@ -8,10 +8,24 @@ Token Bubble 基于 **Quota Float** 开发，并集成 **CodexScope** 的本地�
 
 ## 下载
 
-- [下载当前认可版 Windows x64 安装包](https://github.com/h17612764275-cloud/token-bubble/releases/download/windows-backup-20260912-center-flow/Token-Bubble_0.2.2_center-flow_20260912_x64-setup.exe)
-- 备份日期：2026-09-12；名称：**中心云纹微调版**。
-- 程序内部版本号仍为 `0.2.2`，请按安装包名称和下面的 SHA-256 区分此次备份。
-- [查看历史安装包](https://github.com/h17612764275-cloud/token-bubble/releases)
+| 平台 | 版本 | 安装包 |
+| --- | --- | --- |
+| macOS · Apple Silicon（M 系列） | 0.2.2 · 无语音测试版 · 2026-09-29 | [下载 DMG（约 12 MB）](https://github.com/h17612764275-cloud/tokenbubble/releases/download/macos-20260929-no-voice/Token-Bubble_0.2.2_macos-arm64_20260929.dmg) |
+| Windows · x64 | 0.2.2 · 中心云纹微调版 · 2026-09-12 | [下载 EXE](https://github.com/h17612764275-cloud/tokenbubble/releases/download/windows-backup-20260912-center-flow/Token-Bubble_0.2.2_center-flow_20260912_x64-setup.exe) |
+
+[Mac 发布说明与校验文件](https://github.com/h17612764275-cloud/tokenbubble/releases/tag/macos-20260929-no-voice) · [Windows 备份说明](https://github.com/h17612764275-cloud/tokenbubble/releases/tag/windows-backup-20260912-center-flow) · [全部发布](https://github.com/h17612764275-cloud/tokenbubble/releases)
+
+两个安装包的内部版本号均为 `0.2.2`，请按平台、文件名和发布日期区分。Windows 源码保留在 `main`；Mac 源码位于独立的 [codex/macos-no-voice 分支](https://github.com/h17612764275-cloud/tokenbubble/tree/codex/macos-no-voice)。
+
+## Mac 无语音测试版（2026-09-29）
+
+- **系统要求**：Apple Silicon（M 系列），macOS 14 或更新版本；不提供 Intel 或 Universal 安装包。
+- **功能范围**：保留额度浮窗、Token 用量、两种皮肤、截图与标注、保存、复制、贴图及 CodexScope；统一状态栏、Dock 和 Finder 图标。Mac 版移除了语音识别及相关依赖，**无需下载语音模型**。
+- **安装**：打开 DMG，将 App 拖入「应用程序」。当前使用 ad-hoc 本地签名，未经 Apple Developer ID 签名或公证；若被系统阻止，请确认下载来源，再按「系统设置 → 隐私与安全 → 仍要打开」提示操作。
+- **截图授权**：在「屏幕与系统音频录制」中允许当前 App，然后完全退出并重启。默认快捷键为 `Ctrl+P`，也可在截图设置中点击「开始截图」。替换本地签名版本后，可能需要移除旧录屏条目并重新添加当前 App。
+- **验证边界**：DMG 已通过镜像、挂载和签名检查，GitHub 附件已回下载核验。当前图标构建的录屏权限、贴图窗口交互及 CodexScope 网页界面仍待实机复验；「检查更新」尚未实现自动更新。
+
+[安装说明](https://github.com/h17612764275-cloud/tokenbubble/releases/download/macos-20260929-no-voice/INSTALL-macOS-zh-CN.txt) · [SHA-256 校验文件](https://github.com/h17612764275-cloud/tokenbubble/releases/download/macos-20260929-no-voice/SHA256SUMS.txt) · [固定源码快照](https://github.com/h17612764275-cloud/tokenbubble/tree/macos-20260929-no-voice) · [Mac 移植与验证说明](https://github.com/h17612764275-cloud/tokenbubble/blob/macos-20260929-no-voice/docs/MACOS-PORT.md)
 
 ## Windows 中心云纹微调版备份（2026-09-12）
 
@@ -26,9 +40,9 @@ Token Bubble 基于 **Quota Float** 开发，并集成 **CodexScope** 的本地�
 
 验证记录：139 项前端测试通过，正式构建与已认可预览的深浅背景、静止、拖动和回稳画面对照通过，安装文件与包内文件校验一致。
 
-**此 Windows 安装包对应的应用源码已同步到仓库。** [查看固定源码快照](https://github.com/h17612764275-cloud/token-bubble/tree/windows-source-20260912-center-flow) · [下载源码 ZIP](https://github.com/h17612764275-cloud/token-bubble/archive/refs/tags/windows-source-20260912-center-flow.zip)。
+**此 Windows 安装包对应的应用源码已同步到仓库。** [查看固定源码快照](https://github.com/h17612764275-cloud/tokenbubble/tree/windows-source-20260912-center-flow) · [下载源码 ZIP](https://github.com/h17612764275-cloud/tokenbubble/archive/refs/tags/windows-source-20260912-center-flow.zip)。
 
-安装包备份标签创建于源码同步之前，保持原样；需要对应源码时请使用上面的源码快照，而不是旧备份页底部自动生成的 Source code 文件。本次没有构建或上传 macOS 包。编译缓存、node_modules、本地账号设置、交接记录及语音模型文件不包含在源码提交中；Windows 构建所需语音模型通过下方命令下载。
+安装包备份标签创建于源码同步之前，保持原样；需要对应源码时请使用上面的源码快照，而不是旧备份页底部自动生成的 Source code 文件。2026-09-12 的这次 Windows 备份未包含 macOS 包；Mac 安装包已于 2026-09-29 独立发布，见上方下载区。编译缓存、node_modules、本地账号设置、交接记录及语音模型文件不包含在源码提交中；含语音功能的 Windows 版构建方式见 `main` 分支的开发说明；Mac 分支不需要语音模型。
 
 安装包：`Token-Bubble_0.2.2_center-flow_20260912_x64-setup.exe`（292,794,399 字节）
 
@@ -83,7 +97,7 @@ SHA-256：
 
 > 以下是 `v0.2.2` 的主要更新；安装包与源码版本保持一致。
 
-- **Windows 本地截图与贴图**：从面板相机按钮配置截图，再按全局快捷键（默认 `Ctrl+P`）开始；支持框选、移动、八方向缩放、矩形、圆形、箭头、画笔、马赛克和文字标注。当前截图、剪贴板复制和贴图仅支持 Windows。
+- **Windows 本地截图与贴图**：从面板相机按钮配置截图，再按全局快捷键（默认 `Ctrl+P`）开始；支持框选、移动、八方向缩放、矩形、圆形、箭头、画笔、马赛克和文字标注。该历史版本的截图、剪贴板复制和贴图仅支持 Windows；Mac 移植情况见上方测试版说明。
 - **保存、剪贴板与置顶**：完成后自动保存 PNG 并复制到剪贴板，也可以另存为或把选区作为可拖动、可缩放的置顶贴图。
 - **截图设置**：可以修改全局快捷键、选择默认保存文件夹，并直接打开截图目录。
 - **额度异常自动恢复**：短暂断网时保留最后一次有效额度，30 秒后自动重试；异常浮窗悬停可立即刷新，托盘与浮窗会同步恢复结果。
@@ -127,7 +141,7 @@ Bubble 和 Glass 两款面板都支持取色换色。打开取色器后，可以
 | --- | --- |
 | ![Token Bubble Bubble 浮窗](docs/images/token-bubble-orb-bubble.png?v=0.2.0) | ![Token Bubble Glass 浮窗](docs/images/token-bubble-orb-glass.png?v=0.2.0) |
 
-### 本地实时中英文语音输入
+### Windows 版：本地实时中英文语音输入
 
 按一次自定义快捷键开启持续识别，再按一次关闭。语音会边说边显示文字，支持中文、英文及中英混说，并通过本地模型自动补充标点。快捷键、麦克风设备和识别灵敏度均可设置。
 
@@ -144,9 +158,9 @@ Bubble 和 Glass 两款面板都支持取色换色。打开取色器后，可以
 - 调整浮窗大小、固定浮窗位置并保持窗口置顶。
 - 设置会员续费日期并显示距离续费还有多少天。
 - 从托盘快速刷新、显示或隐藏面板和浮窗。
-- 使用完全本地的中英文实时语音输入、自动标点和语音活动检测。
-- 统计今日语音输入字数，并在近90天热力图中查看语音用量。
-- 在 Windows 上使用本地截图工具完成区域选择、标注、保存、复制和置顶贴图。
+- Windows 版支持完全本地的中英文实时语音输入、自动标点和语音活动检测；Mac 版不包含语音功能。
+- Windows 版统计今日语音输入字数，并在近90天热力图中查看语音用量。
+- 提供本地截图选区、标注、保存、复制和置顶贴图；Mac 版的权限要求及验证边界见上方说明。
 - 在网络恢复后自动刷新额度，并在托盘面板与浮窗之间同步成功结果。
 
 ## 使用说明
@@ -157,18 +171,18 @@ Bubble 和 Glass 两款面板都支持取色换色。打开取色器后，可以
 3. 点击面板中的用量范围，在今日、近7天和近30天之间切换。
 4. 使用右侧控制按钮切换 Bubble/Glass 皮肤、打开取色器、调整尺寸或固定浮窗。
 5. 点击顶部续费日期设置会员续费时间。
-6. 在语音栏设置快捷键、输入设备和灵敏度；按一次快捷键开启识别，再按一次关闭。
-7. Windows 用户可点击顶部相机按钮配置截图快捷键和保存目录；按快捷键框选区域，完成后保存、复制或置顶。
+6. 仅 Windows 版：在语音栏设置快捷键、输入设备和灵敏度；按一次快捷键开启识别，再按一次关闭。
+7. 点击顶部相机按钮配置截图快捷键和保存目录；Mac 用户需先授予录屏权限，再开始截图。
 
 ## 数据与隐私
 
-Token Bubble 在本机读取现有 Codex Desktop 登录状态，以只读方式查询额度。Token 用量历史、语音字数统计、界面设置、截图设置和会员续费日期保存在本地。语音识别、标点恢复和截图处理均在本机运行。
+Token Bubble 在本机读取现有 Codex Desktop 登录状态，以只读方式查询额度。Token 用量历史、界面设置、截图设置和会员续费日期保存在本地，截图在本机处理。Windows 版的语音识别、标点恢复和语音字数统计也在本地完成；Mac 版没有语音功能。
 
 - 不上传提示词、聊天内容或本地用量历史。
 - 不记录遥测、分析数据或崩溃报告。
 - 不兑换重置额度，也不修改账户设置。
 - 本地 Token 统计用于历史和验证视图，不会替代服务端返回的真实额度。
-- 麦克风音频不会上传或保存；仅最终识别字数用于本地统计。
+- Windows 版麦克风音频不会上传或保存；仅最终识别字数用于本地统计。Mac 版不使用麦克风。
 - 屏幕内容只会在用户主动截图时读取；截图不会上传，由用户保存到本地并复制到系统剪贴板。
 
 完整边界请查看 [PRIVACY.md](PRIVACY.md) 和 [SECURITY.md](SECURITY.md)。
@@ -179,12 +193,25 @@ Token Bubble 是独立的衍生项目，并非 Quota Float 或 CodexScope 的官
 
 - **Quota Float**：提供了基础桌面浮窗架构与 Codex 额度展示能力。
 - **CodexScope**：提供了本地 Token 用量验证相关组件。
-- **sherpa-onnx / Paraformer**：提供本地中英文流式识别和中英文标点恢复运行时及模型。
-- **Token Bubble**：在上述基础上增加了新的面板、皮肤、时间范围、Token 分布、估算花费、浮窗控制、会员续费设置和本地语音输入。
+- **sherpa-onnx / Paraformer**：为 Windows 版提供本地中英文流式识别和标点恢复运行时及模型；Mac 版不包含这些依赖。
+- **Token Bubble**：在上述基础上增加了新的面板、皮肤、时间范围、Token 分布、估算花费、浮窗控制、会员续费设置，以及 Windows 版的本地语音输入。
 
 许可证和第三方声明见 [LICENSE](LICENSE) 与 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
-## 本地开发
+## Mac 源码与构建
+
+需要 Apple Silicon Mac、Xcode 命令行工具、Node.js 和 Rust stable。从 Mac 专用分支构建，不运行语音模型下载命令：
+
+```bash
+git clone --branch codex/macos-no-voice https://github.com/h17612764275-cloud/tokenbubble.git tokenbubble-macos
+cd tokenbubble-macos
+npm ci --ignore-scripts
+./scripts/build-macos.sh
+```
+
+产物位于 `src-tauri/target/release/bundle/macos/`。重新构建可能改变签名，并需要重新授予录屏权限；已发布 DMG 对应固定标签 `macos-20260929-no-voice`。
+
+## Windows 源码与开发（main 分支）
 
 需要 Node.js 20+、Rust stable 和 Tauri 2 对应的系统依赖。
 
@@ -204,4 +231,4 @@ npm run tauri -- build --bundles nsis
 
 ## 反馈
 
-请通过 [GitHub Issues](https://github.com/h17612764275-cloud/token-bubble/issues) 提交问题或建议。发布截图和日志前，请移除令牌、账号信息、邮箱和本地文件路径。
+请通过 [GitHub Issues](https://github.com/h17612764275-cloud/tokenbubble/issues) 提交问题或建议。发布截图和日志前，请移除令牌、账号信息、邮箱和本地文件路径。
